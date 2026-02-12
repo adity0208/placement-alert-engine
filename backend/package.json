@@ -1,0 +1,29 @@
+{
+  "name": "placement-alert-backend",
+  "version": "1.0.0",
+  "description": "Real-time placement alert system backend with Telegram integration",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "generate-session": "node scripts/generateSession.js"
+  },
+  "keywords": [
+    "telegram",
+    "websocket",
+    "placement",
+    "alerts"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "telegram": "^2.22.2",
+    "mongoose": "^8.1.1",
+    "ws": "^8.16.0",
+    "input": "^1.0.1"
+  }
+}
