@@ -5,7 +5,9 @@ export default function NoticesPage({ notices }) {
         <div className="page">
             <div className="page-header">
                 <h2 className="page-title">Recent Notices</h2>
-                <p className="page-subtitle">Last 7 messages from Telegram group</p>
+                <p className="page-subtitle">
+                    Announcements from your placement cell · Updated in real-time
+                </p>
             </div>
 
             {notices.length === 0 ? (

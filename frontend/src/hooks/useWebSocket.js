@@ -6,7 +6,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 export function useWebSocket() {
     const [jobs, setJobs] = useState([]);
     const [notices, setNotices] = useState([]);
-    const [connected, setConnected] = useState(false);
+    const [connectionState, setConnectionState] = useState('connecting');
 
     const wsRef = useRef(null);
     const reconnectTimeoutRef = useRef(null);
@@ -39,7 +39,7 @@ export function useWebSocket() {
 
             ws.onopen = () => {
                 console.log('✅ WebSocket connected');
-                setConnected(true);
+                setConnectionState('connected');
                 reconnectAttemptsRef.current = 0;
 
                 if (reconnectTimeoutRef.current) {
@@ -73,7 +73,7 @@ export function useWebSocket() {
 
             ws.onclose = () => {
                 console.log('🔌 WebSocket disconnected');
-                setConnected(false);
+                setConnectionState('disconnected');
 
                 const delay = Math.min(
                     1000 * Math.pow(2, reconnectAttemptsRef.current),
@@ -131,5 +131,5 @@ export function useWebSocket() {
         return () => clearInterval(interval);
     }, []);
 
-    return { jobs, notices, connected, wsRef };
+    return { jobs, notices, connectionState, wsRef };
 }
