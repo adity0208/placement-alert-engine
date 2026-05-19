@@ -43,6 +43,11 @@ app.get('/', (req, res) => {
     });
 });
 
+// Lightweight ping endpoint specifically designed for frontend wake-ups
+app.get('/api/ping', (req, res) => {
+    res.status(200).send('pong');
+});
+
 // Get all active jobs (with rate limiting)
 app.get('/jobs', jobsLimiter, async (req, res) => {
     try {
@@ -141,11 +146,16 @@ function validateEnvironment() {
     logger.success('Environment variables validated');
 }
 
-// Connect to MongoDB
+// Connect to MongoDB with optimized connection pooling
 async function connectDB() {
     try {
-        await mongoose.connect(process.env.MONGODB_URI);
-        logger.success('Connected to MongoDB');
+        await mongoose.connect(process.env.MONGODB_URI, {
+            maxPoolSize: 10, // Maintain up to 10 socket connections
+            minPoolSize: 2, // Keep at least 2 connections active
+            serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
+            socketTimeoutMS: 45000 // Close sockets after 45 seconds of inactivity
+        });
+        logger.success('Connected to MongoDB (Pool Size: 10)');
     } catch (error) {
         logger.error('MongoDB connection error:', error.message);
         process.exit(1);

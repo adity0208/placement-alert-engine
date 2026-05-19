@@ -18,21 +18,54 @@ function ServerLoading({ connectionState }) {
         };
     }, [connectionState]);
 
+    const skeletonCards = Array(6).fill(null);
+
     return (
-        <div className="page">
-            <div className="empty-state loading-state" style={{ marginTop: '10vh' }}>
-                <div className="loading-spinner"></div>
-                <h3>
-                    {isLongWait
-                        ? "Taking longer than usual. Try refreshing the page."
-                        : "Waking up the server..."}
-                </h3>
-                {!isLongWait && (
-                    <>
-                        <p>This takes about 30–60 seconds on first load. Hang tight.</p>
-                        <p className="loading-subtext">Backend is hosted on Render free tier — it sleeps when inactive.</p>
-                    </>
-                )}
+        <div className="page relative">
+            <div className="page-header">
+                <div className="skeleton skeleton-text" style={{ width: '250px', height: '40px', borderRadius: '8px' }}></div>
+            </div>
+            
+            <div className="search-bar-wrapper mb-8">
+                <div className="skeleton" style={{ width: '100%', height: '46px', borderRadius: '24px' }}></div>
+            </div>
+
+            <div className="jobs-grid">
+                {skeletonCards.map((_, index) => (
+                    <div key={index} className="job-card" style={{ pointerEvents: 'none' }}>
+                        <div className="job-header">
+                            <div className="skeleton skeleton-text" style={{ width: '70%', height: '24px', marginBottom: '12px' }}></div>
+                            <div className="job-meta">
+                                <div className="skeleton" style={{ width: '100px', height: '20px', borderRadius: '4px' }}></div>
+                                <div className="skeleton" style={{ width: '80px', height: '20px', borderRadius: '4px' }}></div>
+                            </div>
+                            <div className="skeleton" style={{ width: '60px', height: '20px', borderRadius: '4px', marginTop: '8px' }}></div>
+                        </div>
+
+                        <div className="skeleton skeleton-text" style={{ width: '100%', height: '16px', marginBottom: '8px' }}></div>
+                        <div className="skeleton skeleton-text" style={{ width: '90%', height: '16px', marginBottom: '8px' }}></div>
+                        <div className="skeleton skeleton-text" style={{ width: '60%', height: '16px', marginBottom: '24px' }}></div>
+
+                        <div className="job-actions">
+                            <div className="skeleton" style={{ width: '110px', height: '36px', borderRadius: '6px' }}></div>
+                            <div className="skeleton" style={{ width: '80px', height: '36px', borderRadius: '6px' }}></div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <div className="skeleton-banner">
+                <div className="loading-spinner banner-spinner"></div>
+                <div className="banner-text">
+                    <h4 className="banner-title">
+                        {isLongWait
+                            ? "Taking longer than usual. Try refreshing the page."
+                            : "Waking up the server..."}
+                    </h4>
+                    {!isLongWait && (
+                        <p className="banner-subtext">Backend is hosted on Render free tier — it sleeps when inactive.</p>
+                    )}
+                </div>
             </div>
         </div>
     );

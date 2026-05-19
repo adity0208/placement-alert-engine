@@ -13,8 +13,47 @@ export function useWebSocket() {
     const reconnectAttemptsRef = useRef(0);
     const MAX_RECONNECT_DELAY = 30000; // 30 seconds
 
-    // Fetch initial data
+    // Fetch initial data with timeout and fallback
     const fetchInitialData = async () => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
+        try {
+            const [jobsRes, noticesRes] = await Promise.all([
+                fetch(`${API_URL}/jobs`, { signal: controller.signal }),
+                fetch(`${API_URL}/notices`, { signal: controller.signal })
+            ]);
+
+            clearTimeout(timeoutId);
+
+            const jobsData = await jobsRes.json();
+            const noticesData = await noticesRes.json();
+
+            if (jobsData.success) {
+                setJobs(jobsData.jobs);
+                localStorage.setItem('cachedJobs', JSON.stringify(jobsData.jobs));
+            }
+            if (noticesData.success) {
+                setNotices(noticesData.notices);
+                localStorage.setItem('cachedNotices', JSON.stringify(noticesData.notices));
+            }
+        } catch (error) {
+            console.warn('Initial fetch failed or timed out. Falling back to local cache.', error);
+            
+            // Load from cache
+            const cachedJobs = localStorage.getItem('cachedJobs');
+            const cachedNotices = localStorage.getItem('cachedNotices');
+            
+            if (cachedJobs) setJobs(JSON.parse(cachedJobs));
+            if (cachedNotices) setNotices(JSON.parse(cachedNotices));
+
+            // Background retry for fresh data (waits for backend cold start)
+            backgroundRetry();
+        }
+    };
+
+    const backgroundRetry = async () => {
+        console.log('Initiating background retry to fetch fresh data...');
         try {
             const [jobsRes, noticesRes] = await Promise.all([
                 fetch(`${API_URL}/jobs`),
@@ -24,10 +63,17 @@ export function useWebSocket() {
             const jobsData = await jobsRes.json();
             const noticesData = await noticesRes.json();
 
-            if (jobsData.success) setJobs(jobsData.jobs);
-            if (noticesData.success) setNotices(noticesData.notices);
+            if (jobsData.success) {
+                setJobs(jobsData.jobs);
+                localStorage.setItem('cachedJobs', JSON.stringify(jobsData.jobs));
+            }
+            if (noticesData.success) {
+                setNotices(noticesData.notices);
+                localStorage.setItem('cachedNotices', JSON.stringify(noticesData.notices));
+            }
+            console.log('Background retry successful. Fresh data loaded.');
         } catch (error) {
-            console.error('Error fetching initial data:', error);
+            console.error('Background retry failed:', error);
         }
     };
 
