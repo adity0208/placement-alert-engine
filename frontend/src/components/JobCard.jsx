@@ -183,7 +183,7 @@ export default function JobCard({ job }) {
                         <Clock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                         {formatDate(job?.createdAt)}
                     </span>
-                    {timeRemaining && (
+                    {(isExpiringSoon || timeRemaining === 'Expired') && timeRemaining && (
                         <span className={`meta-item timer ${timeRemaining === 'Expired' ? 'expired' : ''}`}>
                             <Zap className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                             {timeRemaining}
