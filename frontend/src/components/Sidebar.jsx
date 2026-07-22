@@ -1,4 +1,13 @@
-export default function Sidebar({ currentPage, setCurrentPage, jobsCount, noticesCount, connectionState }) {
+export default function Sidebar({ 
+    currentPage, 
+    setCurrentPage, 
+    jobsCount, 
+    hackathonsCount, 
+    connectionState, 
+    sources = [], 
+    selectedSource, 
+    setSelectedSource 
+}) {
     let statusColor, statusText, dotClass;
     if (connectionState === 'connected') {
         statusColor = 'connected';
@@ -13,6 +22,7 @@ export default function Sidebar({ currentPage, setCurrentPage, jobsCount, notice
         statusText = 'Reconnecting...';
         dotClass = '';
     }
+
     return (
         <aside className="sidebar">
             <div className="sidebar-header">
@@ -21,12 +31,14 @@ export default function Sidebar({ currentPage, setCurrentPage, jobsCount, notice
             </div>
 
             <nav className="sidebar-nav">
+                <div className="sidebar-nav-section-title">CATEGORIES</div>
+                
                 <button
                     className={`nav-item ${currentPage === 'jobs' ? 'active' : ''}`}
                     onClick={() => setCurrentPage('jobs')}
                 >
                     <span className="nav-icon">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
                             <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
                         </svg>
@@ -36,25 +48,46 @@ export default function Sidebar({ currentPage, setCurrentPage, jobsCount, notice
                 </button>
 
                 <button
-                    className={`nav-item ${currentPage === 'notices' ? 'active' : ''}`}
-                    onClick={() => setCurrentPage('notices')}
+                    className={`nav-item ${currentPage === 'hackathons' ? 'active' : ''}`}
+                    onClick={() => setCurrentPage('hackathons')}
                 >
                     <span className="nav-icon">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="12" y1="2" x2="12" y2="4"></line>
-                            <line x1="12" y1="20" x2="12" y2="22"></line>
-                            <line x1="4.93" y1="4.93" x2="6.34" y2="6.34"></line>
-                            <line x1="17.66" y1="17.66" x2="19.07" y2="19.07"></line>
-                            <line x1="2" y1="12" x2="4" y2="12"></line>
-                            <line x1="20" y1="12" x2="22" y2="12"></line>
-                            <line x1="4.93" y1="19.07" x2="6.34" y2="17.66"></line>
-                            <line x1="17.66" y1="4.93" x2="19.07" y2="6.34"></line>
-                            <path d="M12 8v4l3 3"></path>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3z"></path>
+                            <path d="M6 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3z"></path>
+                            <path d="M18 8H6"></path>
+                            <path d="M18 16H6"></path>
                         </svg>
                     </span>
-                    <span className="nav-label">Notices</span>
-                    {noticesCount > 0 && <span className="badge">{noticesCount}</span>}
+                    <span className="nav-label">Hackathons</span>
+                    {hackathonsCount > 0 && <span className="badge">{hackathonsCount}</span>}
                 </button>
+
+                {/* Sources filtering section */}
+                <div className="sidebar-separator" />
+                <div className="sidebar-nav-section-title">TARGET SOURCES</div>
+                
+                <button
+                    className={`nav-item source-item ${selectedSource === 'all' ? 'active' : ''}`}
+                    onClick={() => setSelectedSource('all')}
+                >
+                    <span className="source-dot all-dot" />
+                    <span className="nav-label">All Channels</span>
+                </button>
+
+                <div className="sources-scroll-container">
+                    {sources.map((source) => (
+                        <button
+                            key={source}
+                            className={`nav-item source-item ${selectedSource === source ? 'active' : ''}`}
+                            onClick={() => setSelectedSource(source)}
+                            title={source}
+                        >
+                            <span className="source-dot hash-dot">#</span>
+                            <span className="nav-label source-label-truncate">{source}</span>
+                        </button>
+                    ))}
+                </div>
             </nav>
 
             <div className="sidebar-footer">

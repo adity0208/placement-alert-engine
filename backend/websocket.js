@@ -111,7 +111,7 @@ export function broadcast(job, messageType = 'job') {
     }
 
     const message = {
-        type: messageType === 'job' ? 'new_job' : 'new_notice',
+        type: messageType === 'job' ? 'new_job' : 'new_hackathon',
         data: job,
         timestamp: new Date().toISOString()
     };

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import JobsPage from './pages/JobsPage';
-import NoticesPage from './pages/NoticesPage';
+import HackathonsPage from './pages/HackathonsPage';
 import { useWebSocket } from './hooks/useWebSocket';
 import './index.css';
 
@@ -73,28 +73,57 @@ function ServerLoading({ connectionState }) {
 
 function App() {
     const [currentPage, setCurrentPage] = useState('jobs');
-    const { jobs, notices, connectionState } = useWebSocket();
+    const [selectedSource, setSelectedSource] = useState('all');
+    const { jobs, hackathons, connectionState } = useWebSocket();
 
     // Show loading state if we are not connected and have no data
-    const isWaiting = connectionState !== 'connected' && jobs.length === 0;
+    const isWaiting = connectionState !== 'connected' && jobs.length === 0 && hackathons.length === 0;
+
+    // Dynamically compile the list of unique sources present in jobs and hackathons
+    const activeSources = Array.from(
+        new Set([
+            ...jobs.map(j => j.sourceName).filter(Boolean),
+            ...hackathons.map(h => h.sourceName).filter(Boolean)
+        ])
+    );
+
+    // Filter jobs based on source
+    const filteredJobs = selectedSource === 'all'
+        ? jobs
+        : jobs.filter(j => j.sourceName === selectedSource);
+
+    // Filter hackathons based on source
+    const filteredHackathons = selectedSource === 'all'
+        ? hackathons
+        : hackathons.filter(h => h.sourceName === selectedSource);
+
+    // Reset filtering if current selected source disappears (e.g. cache clearance)
+    useEffect(() => {
+        if (selectedSource !== 'all' && !activeSources.includes(selectedSource)) {
+            setSelectedSource('all');
+        }
+    }, [jobs, hackathons]);
 
     return (
         <div className="app">
             <Sidebar
                 currentPage={currentPage}
                 setCurrentPage={setCurrentPage}
-                jobsCount={jobs.length}
-                noticesCount={notices.length}
+                jobsCount={filteredJobs.length}
+                hackathonsCount={filteredHackathons.length}
                 connectionState={connectionState}
+                sources={activeSources}
+                selectedSource={selectedSource}
+                setSelectedSource={setSelectedSource}
             />
 
             <main className="main-content">
                 {isWaiting ? (
                     <ServerLoading connectionState={connectionState} />
                 ) : currentPage === 'jobs' ? (
-                    <JobsPage jobs={jobs} />
+                    <JobsPage jobs={filteredJobs} />
                 ) : (
-                    <NoticesPage notices={notices} />
+                    <HackathonsPage hackathons={filteredHackathons} />
                 )}
             </main>
         </div>

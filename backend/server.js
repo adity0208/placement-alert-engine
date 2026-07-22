@@ -73,41 +73,45 @@ app.get('/jobs', jobsLimiter, async (req, res) => {
     }
 });
 
-// Get last 7 notices
-app.get('/notices', async (req, res) => {
+// Get last active hackathons (active hackathons, sorted by creation, limit to last 20)
+app.get('/hackathons', async (req, res) => {
     try {
-        const notices = await Job.find({
-            type: 'notice'
-        }).sort({ createdAt: -1 }).limit(7);
+        const now = new Date();
+        const hackathons = await Job.find({
+            type: 'hackathon',
+            expiresAt: { $gt: now }
+        }).sort({ createdAt: -1 }).limit(20);
 
-        logger.info(`Notices endpoint accessed (${notices.length} notices)`);
+        logger.info(`Hackathons endpoint accessed (${hackathons.length} active hackathons)`);
 
         res.json({
             success: true,
-            count: notices.length,
-            notices: notices
+            count: hackathons.length,
+            hackathons: hackathons
         });
     } catch (error) {
-        logger.error('Error fetching notices:', error.message);
+        logger.error('Error fetching hackathons:', error.message);
         res.status(500).json({
             success: false,
-            error: 'Failed to fetch notices'
+            error: 'Failed to fetch hackathons'
         });
     }
 });
 
-// Get job statistics
+// Get statistics
 app.get('/stats', async (req, res) => {
     try {
         const now = new Date();
-        const activeCount = await Job.countDocuments({ expiresAt: { $gt: now } });
+        const activeJobsCount = await Job.countDocuments({ type: 'job', expiresAt: { $gt: now } });
+        const activeHackathonsCount = await Job.countDocuments({ type: 'hackathon', expiresAt: { $gt: now } });
         const totalCount = await Job.countDocuments();
 
         res.json({
             success: true,
             stats: {
-                activeJobs: activeCount,
-                totalJobs: totalCount,
+                activeJobs: activeJobsCount,
+                activeHackathons: activeHackathonsCount,
+                totalItems: totalCount,
                 connectedClients: getClientCount()
             }
         });
@@ -128,7 +132,7 @@ initWebSocket(server);
 
 // Validate environment variables
 function validateEnvironment() {
-    const required = ['API_ID', 'API_HASH', 'SESSION_STRING', 'TELEGRAM_GROUP_ID', 'MONGODB_URI'];
+    const required = ['API_ID', 'API_HASH', 'SESSION_STRING', 'TELEGRAM_TARGETS', 'MONGODB_URI'];
     const missing = required.filter(key => !process.env[key]);
 
     if (missing.length > 0) {
@@ -136,14 +140,14 @@ function validateEnvironment() {
         process.exit(1);
     }
 
-    // Validate TELEGRAM_GROUP_ID
-    const groupId = Number(process.env.TELEGRAM_GROUP_ID);
-    if (isNaN(groupId)) {
-        logger.error(`Invalid TELEGRAM_GROUP_ID: ${process.env.TELEGRAM_GROUP_ID}. Must be a valid number.`);
+    // Validate TELEGRAM_TARGETS
+    const targets = process.env.TELEGRAM_TARGETS.split(',').map(t => t.trim()).filter(Boolean);
+    if (targets.length === 0) {
+        logger.error('Invalid TELEGRAM_TARGETS: Must contain at least one valid target handle or group ID.');
         process.exit(1);
     }
 
-    logger.success('Environment variables validated');
+    logger.success(`Environment variables validated (${targets.length} targets configured)`);
 }
 
 // Connect to MongoDB with optimized connection pooling

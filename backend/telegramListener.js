@@ -1,10 +1,10 @@
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { NewMessage } from 'telegram/events/NewMessage.js';
-import { filterMessage } from './utils/filter.js';
 import { logger } from './utils/logger.js';
 import Job from './models/Job.js';
 import { broadcast } from './websocket.js';
+import { parseJobMessage } from './aiParser.js';
 
 let client = null;
 let isConnected = false;
@@ -13,47 +13,126 @@ let eventHandlerAdded = false;
 let hasHydrated = false; // Ensure hydration runs only once
 const MAX_RECONNECT_DELAY = 60000; // 60 seconds
 
+// Memory cache of resolved targets: { [chatId]: { id, sourceName, input } }
+let resolvedTargets = {};
+
 /**
  * Initialize and start Telegram listener
  */
 export async function startTelegramListener() {
-    const { API_ID, API_HASH, SESSION_STRING, TELEGRAM_GROUP_ID } = process.env;
+    const { API_ID, API_HASH, SESSION_STRING, TELEGRAM_TARGETS } = process.env;
 
     if (!API_ID || !API_HASH || !SESSION_STRING) {
         throw new Error('Missing Telegram credentials in environment variables');
     }
 
-    if (!TELEGRAM_GROUP_ID) {
-        throw new Error('TELEGRAM_GROUP_ID is required in environment variables');
+    if (!TELEGRAM_TARGETS) {
+        throw new Error('TELEGRAM_TARGETS is required in environment variables');
     }
-
-    // Validate and convert TELEGRAM_GROUP_ID
-    const groupId = Number(TELEGRAM_GROUP_ID);
-    if (isNaN(groupId)) {
-        throw new Error(`Invalid TELEGRAM_GROUP_ID: ${TELEGRAM_GROUP_ID}. Must be a valid number.`);
-    }
-
-    logger.info(`Telegram group ID resolved: ${groupId}`);
 
     try {
-        await connectTelegram(parseInt(API_ID), API_HASH, SESSION_STRING, groupId);
+        await connectTelegram(parseInt(API_ID), API_HASH, SESSION_STRING, TELEGRAM_TARGETS);
     } catch (error) {
         logger.error('Failed to start Telegram listener:', error.message);
-        scheduleReconnect(parseInt(API_ID), API_HASH, SESSION_STRING, groupId);
+        scheduleReconnect(parseInt(API_ID), API_HASH, SESSION_STRING, TELEGRAM_TARGETS);
     }
+}
+
+/**
+ * Resolve target channels/groups from config
+ */
+async function resolveTargets(targetsString) {
+    const targets = targetsString.split(',').map(t => t.trim()).filter(Boolean);
+    const map = {};
+
+    for (const target of targets) {
+        try {
+            logger.info(`Resolving target entity: "${target}"...`);
+            let queryTarget = target;
+            if (/^-?\d+$/.test(target)) {
+                queryTarget = Number(target);
+            }
+
+            const entity = await client.getEntity(queryTarget);
+            const entityId = entity.id.toString();
+            const sourceName = entity.title || entity.username || target;
+
+            map[entityId] = {
+                id: entityId,
+                sourceName: sourceName,
+                input: target
+            };
+            
+            logger.success(`Resolved target: "${target}" -> ID: ${entityId} ("${sourceName}")`);
+        } catch (error) {
+            logger.error(`Failed to resolve Telegram target "${target}":`, error.message);
+            // Fallback for numeric IDs if lookups fail (Dialogs not loaded)
+            if (/^-?\d+$/.test(target)) {
+                const cleanId = target.replace('-100', '');
+                map[target] = {
+                    id: target,
+                    sourceName: `Group ${target}`,
+                    input: target
+                };
+                map[cleanId] = map[target];
+                logger.warn(`Registered fallback numeric target: ${target}`);
+            }
+        }
+    }
+    return map;
+}
+
+/**
+ * Match incoming message chatId or peerId to a resolved target
+ */
+function findMatchedTarget(message) {
+    if (!message) return null;
+
+    const chatIdStr = message.chatId ? message.chatId.toString() : null;
+    let peerIdStr = null;
+
+    if (message.peerId) {
+        const idVal = message.peerId.channelId || message.peerId.chatId || message.peerId.userId;
+        peerIdStr = idVal ? idVal.toString() : null;
+    }
+
+    const candidateIds = [chatIdStr, peerIdStr].filter(Boolean);
+
+    for (const cid of candidateIds) {
+        if (resolvedTargets[cid]) {
+            return resolvedTargets[cid];
+        }
+        
+        // Handles negative variations
+        const negCid = cid.startsWith('-') ? cid.substring(1) : '-' + cid;
+        if (resolvedTargets[negCid]) {
+            return resolvedTargets[negCid];
+        }
+
+        // Handles GramJS -100 offset variations
+        const cleanCid = cid.replace('-100', '');
+        const keys = Object.keys(resolvedTargets);
+        for (const key of keys) {
+            const cleanKey = key.replace('-100', '');
+            if (cleanCid === cleanKey) {
+                return resolvedTargets[key];
+            }
+        }
+    }
+    return null;
 }
 
 /**
  * Connect to Telegram
  */
-async function connectTelegram(apiId, apiHash, sessionString, groupId) {
+async function connectTelegram(apiId, apiHash, sessionString, targetsString) {
     try {
         logger.info('Connecting to Telegram...');
 
         const session = new StringSession(sessionString);
         client = new TelegramClient(session, apiId, apiHash, {
-            connectionRetries: 3, // Reduced from 5 to fail faster
-            autoReconnect: false, // Disable auto-reconnect to prevent error spam
+            connectionRetries: 3,
+            autoReconnect: false,
         });
 
         await client.connect();
@@ -62,33 +141,35 @@ async function connectTelegram(apiId, apiHash, sessionString, groupId) {
 
         logger.success('Telegram client connected');
 
+        // Resolve targets in memory
+        resolvedTargets = await resolveTargets(targetsString);
+
         // Add event handler only once
         if (!eventHandlerAdded) {
-            client.addEventHandler((event) => handleNewMessage(event, groupId), new NewMessage({}));
+            client.addEventHandler(handleNewMessage, new NewMessage({}));
             eventHandlerAdded = true;
             logger.success('Telegram message listener registered');
         }
 
-        // Hydrate from history only once on initial startup
+        // Hydrate database from Telegram target histories
         if (!hasHydrated) {
             hasHydrated = true;
-            await hydrateFromHistory(groupId);
+            await hydrateFromHistory();
         }
 
         // Handle disconnection
         client.on('disconnected', () => {
             isConnected = false;
             logger.warn('Telegram client disconnected');
-            scheduleReconnect(apiId, apiHash, sessionString, groupId);
+            scheduleReconnect(apiId, apiHash, sessionString, targetsString);
         });
 
     } catch (error) {
         isConnected = false;
         logger.error('Telegram connection error:', error.message);
 
-        // Don't spam logs with connection errors
         if (reconnectAttempts < 3) {
-            throw error; // Only throw on first few attempts
+            throw error;
         } else {
             logger.warn('Telegram connection failed. App will continue without live updates.');
         }
@@ -98,10 +179,9 @@ async function connectTelegram(apiId, apiHash, sessionString, groupId) {
 /**
  * Schedule reconnection with exponential backoff
  */
-function scheduleReconnect(apiId, apiHash, sessionString, groupId) {
+function scheduleReconnect(apiId, apiHash, sessionString, targetsString) {
     if (isConnected) return;
 
-    // Stop trying after 5 failed attempts
     if (reconnectAttempts >= 5) {
         logger.warn('Max reconnection attempts reached. Telegram features disabled. App will continue serving API.');
         return;
@@ -118,262 +198,255 @@ function scheduleReconnect(apiId, apiHash, sessionString, groupId) {
 
     setTimeout(async () => {
         try {
-            await connectTelegram(apiId, apiHash, sessionString, groupId);
+            await connectTelegram(apiId, apiHash, sessionString, targetsString);
         } catch (error) {
-            scheduleReconnect(apiId, apiHash, sessionString, groupId);
+            scheduleReconnect(apiId, apiHash, sessionString, targetsString);
         }
     }, delay);
 }
 
 /**
- * Hydrate database from Telegram message history
- * Fetches last 50 messages and stores them as jobs or notices
- * @param {Number} targetGroupId - Target group ID
+ * Hydrate database from Telegram target message histories
  */
-async function hydrateFromHistory(targetGroupId) {
+async function hydrateFromHistory() {
     try {
         logger.info('Hydration started');
 
-        // Fetch last 50 messages from the group
-        const messages = await client.getMessages(targetGroupId, { limit: 50 });
-
-        logger.info(`Fetched ${messages.length} messages from Telegram`);
-
-        // Print last 7 messages for debugging
-        console.log('\n========== LAST 7 MESSAGES FROM TELEGRAM ==========');
-        const last7 = messages.slice(0, 7);
-        last7.forEach((msg, index) => {
-            if (msg.message) {
-                console.log(`\n--- Message ${index + 1} (ID: ${msg.id}) ---`);
-                console.log(msg.message.substring(0, 200) + (msg.message.length > 200 ? '...' : ''));
-            }
-        });
-        console.log('\n===================================================\n');
+        const uniqueTargets = Object.values(resolvedTargets).reduce((acc, current) => {
+            const exists = acc.find(item => item.id === current.id);
+            if (!exists) acc.push(current);
+            return acc;
+        }, []);
 
         let processedCount = 0;
         let jobsStored = 0;
-        let noticesStored = 0;
+        let hackathonsStored = 0;
+        let aiParsedCount = 0; // Guard for free-tier Gemini API (max 3 total per startup)
 
-        for (const message of messages) {
-            processedCount++;
+        for (const target of uniqueTargets) {
+            logger.info(`Hydrating from target: "${target.sourceName}" (ID: ${target.id})...`);
 
-            // Use message.message instead of message.text (GramJS property)
-            const messageText = message.message?.trim();
-            const messageId = message.id;
+            let queryTarget = target.id;
+            if (/^-?\d+$/.test(target.id)) {
+                queryTarget = Number(target.id);
+            } else if (target.input) {
+                queryTarget = target.input;
+            }
 
-            // Debug log for each message
-            logger.info(`[Hydration] Message ${messageId}: type=${typeof message.message}, length=${messageText?.length || 0}`);
-
-            // Skip if no message text or empty
-            if (!messageText || messageText.length === 0) {
-                logger.warn(`[Hydration] Skipping message ${messageId}: empty or no text`);
+            let messages = [];
+            try {
+                messages = await client.getMessages(queryTarget, { limit: 50 }); // Fetch last 50 messages to cover 3-day active window
+            } catch (err) {
+                logger.error(`Failed to fetch messages for target "${target.sourceName}":`, err.message);
                 continue;
             }
 
-            // No need to verify chatId - client.getMessages(targetGroupId) already filters by group
+            logger.info(`Fetched ${messages.length} messages from "${target.sourceName}"`);
 
-            // Check if message passes job filter
-            const filteredJob = filterMessage(messageText);
+            for (const message of messages) {
+                processedCount++;
+                const messageText = message.message?.trim();
+                const messageId = message.id;
 
-            // ALWAYS store as notice (no filtering for notices)
-            const noticeData = {
-                type: 'notice',
-                title: messageText.substring(0, 100) + (messageText.length > 100 ? '...' : ''),
-                message: messageText,
-                link: null,
-                telegramMessageId: messageId,
-                groupId: Math.abs(targetGroupId),
-                expiresAt: null
-            };
-
-            // Save notice to MongoDB
-            try {
-                const notice = new Job(noticeData);
-                await notice.save();
-                noticesStored++;
-                logger.info(`[Hydration] Notice saved: ID=${messageId}`);
-            } catch (error) {
-                // Skip duplicates silently
-                if (error.code !== 11000) {
-                    logger.error(`Error storing notice ${messageId}:`, error.message);
-                } else {
-                    logger.warn(`[Hydration] Duplicate notice skipped: ID=${messageId}`);
+                if (!messageText || messageText.length === 0) {
+                    continue;
                 }
-            }
 
-            // If message also passes job filter, store it as a job too
-            if (filteredJob) {
-                const jobData = {
-                    type: 'job',
-                    ...filteredJob,
-                    telegramMessageId: messageId + 1000000, // Different ID to avoid duplicate key error
-                    groupId: Math.abs(targetGroupId)
-                };
+                // Check duplicate check to prevent double parsing
+                const existing = await Job.findOne({
+                    telegramMessageId: messageId,
+                    groupId: target.id
+                });
 
-                try {
-                    const job = new Job(jobData);
-                    await job.save();
-                    jobsStored++;
-                    logger.info(`[Hydration] Job saved: ID=${messageId}`);
-                } catch (error) {
-                    if (error.code !== 11000) {
-                        logger.error(`Error storing job ${messageId}:`, error.message);
-                    } else {
-                        logger.warn(`[Hydration] Duplicate job skipped: ID=${messageId}`);
+                if (existing) {
+                    logger.info(`[Hydration] Already processed message ${messageId} in group ${target.id}. Skipping.`);
+                    continue;
+                }
+
+                // Determine whether to use high-fidelity AI parser or fast local fallback parser
+                const useAI = (aiParsedCount < 3) && !!process.env.GEMINI_API_KEY;
+
+                if (useAI) {
+                    logger.info(`[Hydration] Slot ${aiParsedCount + 1}/3: Parsing message ${messageId} from "${target.sourceName}" via Gemini...`);
+                } else {
+                    logger.info(`[Hydration] Parsing message ${messageId} from "${target.sourceName}" via Local Fallback...`);
+                }
+
+                const parsed = await parseJobMessage(messageText, !useAI);
+
+                if (parsed && parsed.type !== 'other') {
+                    // Check for duplicate job/hackathon links across channels
+                    if (parsed.applyLink) {
+                        const existingLink = await Job.findOne({
+                            applyLink: parsed.applyLink,
+                            type: parsed.type
+                        });
+                        if (existingLink) {
+                            logger.info(`[Hydration] Duplicate ${parsed.type} link detected: ${parsed.applyLink}. Skipping.`);
+                            continue;
+                        }
+                    }
+                    const jobData = {
+                        type: parsed.type, // 'job' or 'hackathon'
+                        title: parsed.type === 'job' 
+                            ? `${parsed.companyName} is hiring for ${parsed.jobRole || 'Role'}`
+                            : parsed.title,
+                        message: messageText,
+                        link: parsed.applyLink,
+                        companyName: parsed.companyName,
+                        jobRole: parsed.jobRole,
+                        deadline: parsed.deadline,
+                        applyLink: parsed.applyLink,
+                        eligibility: parsed.eligibility,
+                        experience: parsed.experience,
+                        targetBatch: parsed.targetBatch,
+                        organizer: parsed.organizer,
+                        prizePool: parsed.prizePool,
+                        sourceName: target.sourceName,
+                        groupId: target.id,
+                        telegramMessageId: messageId,
+                        isAIParsed: useAI
+                    };
+
+                    try {
+                        const item = new Job(jobData);
+                        await item.save();
+                        
+                        if (parsed.type === 'job') jobsStored++;
+                        else hackathonsStored++;
+
+                        logger.info(`[Hydration] Saved ${parsed.type}: "${jobData.title}" (AI Parsed: ${useAI})`);
+                    } catch (error) {
+                        if (error.code !== 11000) {
+                            logger.error(`Error saving message ${messageId}:`, error.message);
+                        }
+                    }
+
+                    if (useAI) {
+                        aiParsedCount++;
+                        // Rate limit wait window
+                        await new Promise(resolve => setTimeout(resolve, 1500));
                     }
                 }
             }
         }
 
-        // Keep only last 7 notices
-        await cleanupOldNotices();
-
         logger.success(`\n========== HYDRATION SUMMARY ==========`);
-        logger.success(`Total messages fetched: ${messages.length}`);
         logger.success(`Total messages processed: ${processedCount}`);
-        logger.success(`Total notices saved: ${noticesStored}`);
         logger.success(`Total jobs saved: ${jobsStored}`);
+        logger.success(`Total hackathons saved: ${hackathonsStored}`);
         logger.success(`=======================================\n`);
 
     } catch (error) {
         logger.error('Hydration failed:', error.message);
-        // Don't crash - continue with normal operation
     }
 }
 
 /**
- * Clean up old notices, keeping only the last 7
+ * Handle incoming Telegram messages in real-time
  */
-async function cleanupOldNotices() {
-    try {
-        const notices = await Job.find({ type: 'notice' })
-            .sort({ createdAt: -1 })
-            .skip(7);
-
-        if (notices.length > 0) {
-            const idsToDelete = notices.map(n => n._id);
-            await Job.deleteMany({ _id: { $in: idsToDelete } });
-            logger.info(`Cleaned up ${notices.length} old notice(s)`);
-        }
-    } catch (error) {
-        logger.error('Error cleaning up notices:', error.message);
-    }
-}
-
-/**
- * Handle incoming Telegram messages
- * @param {Object} event - Telegram message event
- * @param {Number} targetGroupId - Target group ID to filter
- */
-async function handleNewMessage(event, targetGroupId) {
+async function handleNewMessage(event) {
     try {
         const message = event.message;
-
-        // Use message.message instead of message.text (GramJS property)
         const messageText = message.message?.trim();
         const messageId = message.id;
 
-        // Debug log
-        logger.info(`[Real-time] Message ${messageId}: type=${typeof message.message}, length=${messageText?.length || 0}`);
+        if (!messageText || messageText.length === 0) return;
 
-        // Skip if no message text or empty
-        if (!messageText || messageText.length === 0) {
-            logger.warn(`[Real-time] Skipping message ${messageId}: empty or no text`);
+        // Find matched target
+        const matched = findMatchedTarget(message);
+        if (!matched) {
+            logger.info(`[Real-time] Skipping message ${messageId}: not from any target target`);
             return;
         }
 
-        // Filter by group ID
-        const chatId = message.chatId?.value || message.peerId?.channelId?.value;
-        if (!chatId || Number(chatId) !== Math.abs(targetGroupId)) {
-            logger.warn(`[Real-time] Skipping message ${messageId}: not from target group`);
-            return; // Not from target group
+        logger.info(`[Real-time] New message from target "${matched.sourceName}" (ID: ${messageId})`);
+
+        // Check if already processed
+        const existing = await Job.findOne({
+            telegramMessageId: messageId,
+            groupId: matched.id
+        });
+
+        if (existing) {
+            logger.warn(`[Real-time] Duplicate message ${messageId} detected in group ${matched.id}. Skipping.`);
+            return;
         }
 
-        logger.info(`[Real-time] New message from target group (ID: ${messageId})`);
+        // Call Gemini AI parser to classify and parse
+        logger.info(`[Real-time] Classifying message ${messageId} via Gemini AI...`);
+        const parsed = await parseJobMessage(messageText);
 
-        // ALWAYS store as notice (no filtering for notices)
-        const noticeData = {
-            type: 'notice',
-            title: messageText.substring(0, 100) + (messageText.length > 100 ? '...' : ''),
+        if (parsed.type === 'other') {
+            logger.info(`[Real-time] Message classified as "other". Discarding.`);
+            return;
+        }
+
+        // Check for duplicate job/hackathon links across channels
+        if (parsed.applyLink) {
+            const existingLink = await Job.findOne({
+                applyLink: parsed.applyLink,
+                type: parsed.type
+            });
+            if (existingLink) {
+                logger.warn(`[Real-time] Duplicate ${parsed.type} link detected: ${parsed.applyLink}. Skipping.`);
+                return;
+            }
+        }
+
+        const jobData = {
+            type: parsed.type, // 'job' or 'hackathon'
+            title: parsed.type === 'job' 
+                ? `${parsed.companyName} is hiring for ${parsed.jobRole || 'Role'}`
+                : parsed.title,
             message: messageText,
-            link: null,
+            link: parsed.applyLink,
+            companyName: parsed.companyName,
+            jobRole: parsed.jobRole,
+            deadline: parsed.deadline,
+            applyLink: parsed.applyLink,
+            eligibility: parsed.eligibility,
+            experience: parsed.experience,
+            targetBatch: parsed.targetBatch,
+            organizer: parsed.organizer,
+            prizePool: parsed.prizePool,
+            sourceName: matched.sourceName,
+            groupId: matched.id,
             telegramMessageId: messageId,
-            groupId: Math.abs(targetGroupId),
-            expiresAt: null
+            isAIParsed: true
         };
 
-        // Save notice to database
-        try {
-            const notice = new Job(noticeData);
-            await notice.save();
+        const newDoc = new Job(jobData);
+        await newDoc.save();
 
-            logger.success(`Notice saved to database (ID: ${notice._id})`);
+        logger.success(`[Real-time] Saved parsed ${parsed.type} to DB (ID: ${newDoc._id})`);
 
-            // Broadcast notice to WebSocket clients
-            broadcast({
-                _id: notice._id,
-                type: notice.type,
-                title: notice.title,
-                message: notice.message,
-                link: notice.link,
-                createdAt: notice.createdAt,
-                expiresAt: notice.expiresAt,
-                timeRemaining: notice.timeRemaining
-            }, 'notice');
-
-            // Cleanup old notices (keep only last 7)
-            await cleanupOldNotices();
-
-        } catch (error) {
-            // Handle duplicate key error (code 11000)
-            if (error.code === 11000) {
-                logger.warn(`Duplicate notice detected (Message ID: ${messageId}), skipping...`);
-            } else {
-                logger.error('Error saving notice to database:', error.message);
-            }
-        }
-
-        // Check if message also passes job filter
-        const filteredJob = filterMessage(messageText);
-
-        if (filteredJob) {
-            // Also store as job
-            const jobData = {
-                type: 'job',
-                ...filteredJob,
-                telegramMessageId: messageId + 1000000, // Different ID to avoid duplicate key error
-                groupId: Math.abs(targetGroupId)
-            };
-
-            try {
-                const job = new Job(jobData);
-                await job.save();
-
-                logger.success(`Job saved to database (ID: ${job._id})`);
-
-                // Broadcast job to WebSocket clients
-                broadcast({
-                    _id: job._id,
-                    type: job.type,
-                    title: job.title,
-                    message: job.message,
-                    link: job.link,
-                    createdAt: job.createdAt,
-                    expiresAt: job.expiresAt,
-                    timeRemaining: job.timeRemaining
-                }, 'job');
-
-            } catch (error) {
-                if (error.code === 11000) {
-                    logger.warn(`Duplicate job detected (Message ID: ${messageId}), skipping...`);
-                } else {
-                    logger.error('Error saving job to database:', error.message);
-                }
-            }
-        }
+        // Broadcast to WebSocket clients
+        broadcast({
+            _id: newDoc._id,
+            type: newDoc.type,
+            title: newDoc.title,
+            message: newDoc.message,
+            link: newDoc.link,
+            createdAt: newDoc.createdAt,
+            expiresAt: newDoc.expiresAt,
+            timeRemaining: newDoc.timeRemaining,
+            companyName: newDoc.companyName,
+            jobRole: newDoc.jobRole,
+            deadline: newDoc.deadline,
+            applyLink: newDoc.applyLink,
+            eligibility: newDoc.eligibility,
+            experience: newDoc.experience,
+            targetBatch: newDoc.targetBatch,
+            organizer: newDoc.organizer,
+            prizePool: newDoc.prizePool,
+            sourceName: newDoc.sourceName,
+            groupId: newDoc.groupId,
+            isAIParsed: newDoc.isAIParsed
+        }, parsed.type);
 
     } catch (error) {
-        logger.error('Error handling message:', error.message);
+        logger.error('Error handling real-time message:', error.message);
     }
 }
 

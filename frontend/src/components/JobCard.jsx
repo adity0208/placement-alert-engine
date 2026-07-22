@@ -70,9 +70,11 @@ function parseTitle(message) {
 export default function JobCard({ job }) {
     const [timeRemaining, setTimeRemaining] = useState('');
     const [isExpiringSoon, setIsExpiringSoon] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(false);
 
     useEffect(() => {
         const updateTimer = () => {
+            if (!job || !job.expiresAt) return;
             const now = new Date();
             const expiry = new Date(job.expiresAt);
             const diff = expiry - now;
@@ -92,9 +94,10 @@ export default function JobCard({ job }) {
         updateTimer();
         const interval = setInterval(updateTimer, 60000);
         return () => clearInterval(interval);
-    }, [job.expiresAt]);
+    }, [job?.expiresAt]);
 
     const formatDate = (dateString) => {
+        if (!dateString) return '';
         const date = new Date(dateString);
         return date.toLocaleString('en-US', {
             month: 'short',
@@ -104,43 +107,131 @@ export default function JobCard({ job }) {
         });
     };
 
-    // Determine title: if raw title is a URL, use "Job Opportunity"
-    const rawTitle = job.title || '';
+    // Stable dynamic HSL color generator for company avatars
+    const getCompanyColor = (name) => {
+        if (!name) return 'linear-gradient(135deg, var(--accent-primary), #8b5cf6)';
+        let hash = 0;
+        for (let i = 0; i < name.length; i++) {
+            hash = name.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const h = Math.abs(hash % 360);
+        return `hsl(${h}, 60%, 40%)`;
+    };
+
+    // Stable HSL color generator for source labels
+    const getSourceColor = (name) => {
+        if (!name) return 'var(--text-muted)';
+        let hash = 0;
+        for (let i = 0; i < name.length; i++) {
+            hash = name.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const h = Math.abs(hash % 360);
+        return `hsl(${h}, 45%, 45%)`;
+    };
+
+    // Determine raw title URL checks for fallback
+    const rawTitle = job?.title || '';
     const isTitleUrl = /^https?:\/\//i.test(rawTitle.trim());
-    const displayTitle = isTitleUrl ? 'Job Opportunity' : parseTitle(job.message || rawTitle);
 
-    // Determine Apply Now link: prefer job.link, fallback to any URL in message
-    const applyLink = job.link || extractUrl(job.message || '') || (isTitleUrl ? rawTitle : null);
+    // Resolve presentation text using structured AI fields with bulletproof fallbacks
+    const isAI = !!job?.isAIParsed;
+    const companyName = isAI ? (job.companyName || "New Opportunity") : (isTitleUrl ? "Job Opportunity" : parseTitle(job?.message || rawTitle));
+    const jobRole = isAI ? (job.jobRole || "Placement Drive") : "Placement Alert";
+    const eligibility = isAI ? job.eligibility : extractAudience(job?.message || rawTitle);
+    const deadline = isAI ? job.deadline : null;
+    const experience = job?.experience;
+    const targetBatch = job?.targetBatch;
+    const sourceName = job?.sourceName;
 
-    // Extract audience from original message
-    const audience = extractAudience(job.message || rawTitle);
+    // Resolve application URL
+    const applyLink = job?.applyLink || job?.link || extractUrl(job?.message || '') || (isTitleUrl ? rawTitle : null);
 
-    // Strip salutation from the displayed message body
-    const displayMessage = (job.message || '').replace(/^dear\s+(b\.?tech\s+)?(\w+\s+)?students?,?\s*/i, '').trim();
+    // Strip salutation for a clean presentation
+    const displayMessage = (job?.message || '').replace(/^dear\s+(b\.?tech\s+)?(\w+\s+)?students?,?\s*/i, '').trim();
+
+    const avatarBg = getCompanyColor(companyName);
+    const avatarLetter = companyName.charAt(0).toUpperCase();
+    const sourceColor = getSourceColor(sourceName);
 
     return (
         <div className={`job-card ${isExpiringSoon ? 'expiring-soon' : ''}`}>
-            <div className="job-header">
-                <h3 className="job-title">{displayTitle}</h3>
-                <div className="job-meta">
-                    <span className="meta-item">
-                        🕒 {formatDate(job.createdAt)}
-                    </span>
-                    <span className={`meta-item timer ${timeRemaining === 'Expired' ? 'expired' : ''}`}>
-                        ⚡ {timeRemaining}
-                    </span>
+            {/* Top header row: Dynamic Brand Avatar + Role / Company details */}
+            <div className="job-card-top">
+                <div className="company-avatar" style={{ background: avatarBg }}>
+                    {avatarLetter}
                 </div>
-                {audience && (
-                    <div className="audience-chip">
-                        {audience}
-                    </div>
-                )}
+                <div className="job-header-info">
+                    <span className="job-role-text">{jobRole}</span>
+                    <h3 className="job-company-name">{companyName}</h3>
+                </div>
             </div>
 
-            <p className="job-message">{displayMessage}</p>
+            {/* Sub-meta details row */}
+            <div className="job-header" style={{ marginTop: 'var(--spacing-xs)', marginBottom: 'var(--spacing-sm)' }}>
+                <div className="job-meta">
+                    <span className="meta-item">
+                        🕒 {formatDate(job?.createdAt)}
+                    </span>
+                    {timeRemaining && (
+                        <span className={`meta-item timer ${timeRemaining === 'Expired' ? 'expired' : ''}`}>
+                            ⚡ {timeRemaining}
+                        </span>
+                    )}
+                    {sourceName && (
+                        <span 
+                            className="premium-badge source-badge" 
+                            style={{ 
+                                borderColor: sourceColor, 
+                                color: sourceColor,
+                                background: `${sourceColor}0a`
+                            }}
+                        >
+                            📡 {sourceName}
+                        </span>
+                    )}
+                </div>
 
+                {/* Highly visual tag pills */}
+                <div className="badge-container">
+                    {targetBatch && (
+                        <span className="premium-badge batch-badge" style={{ color: '#3b82f6', background: 'rgba(59, 130, 246, 0.08)' }}>
+                            🎓 Batch: {targetBatch}
+                        </span>
+                    )}
+                    {experience && (
+                        <span className="premium-badge experience-badge" style={{ color: '#a855f7', background: 'rgba(168, 85, 247, 0.08)' }}>
+                            💼 Experience: {experience}
+                        </span>
+                    )}
+                    {eligibility && (
+                        <span className="premium-badge eligibility-badge">
+                            📋 Criteria: {eligibility}
+                        </span>
+                    )}
+                    {deadline && (
+                        <span className="premium-badge deadline-badge">
+                            📅 Deadline: {deadline}
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            {/* Accordion collapsable toggle */}
+            <button 
+                onClick={() => setIsExpanded(!isExpanded)} 
+                className="accordion-trigger"
+                aria-expanded={isExpanded}
+            >
+                {isExpanded ? '▼ Hide Details' : '▶ Show Message Details'}
+            </button>
+
+            <div className={`accordion-content ${isExpanded ? 'expanded' : ''}`}>
+                <p className="job-accordion-text">{displayMessage}</p>
+            </div>
+
+            {/* Lower row buttons */}
             <div className="job-actions">
-                {applyLink && (
+                {applyLink ? (
                     <a
                         href={applyLink}
                         target="_blank"
@@ -149,9 +240,13 @@ export default function JobCard({ job }) {
                     >
                         🔗 Apply Now
                     </a>
+                ) : (
+                    <button className="btn disabled" disabled>
+                        ❌ Link Not Found
+                    </button>
                 )}
                 <button
-                    onClick={() => navigator.clipboard.writeText(job.message)}
+                    onClick={() => navigator.clipboard.writeText(job?.message || '')}
                     className="btn btn-secondary"
                 >
                     📋 Copy

@@ -5,7 +5,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 export function useWebSocket() {
     const [jobs, setJobs] = useState([]);
-    const [notices, setNotices] = useState([]);
+    const [hackathons, setHackathons] = useState([]);
     const [connectionState, setConnectionState] = useState('connecting');
 
     const wsRef = useRef(null);
@@ -19,33 +19,33 @@ export function useWebSocket() {
         const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
 
         try {
-            const [jobsRes, noticesRes] = await Promise.all([
+            const [jobsRes, hackathonsRes] = await Promise.all([
                 fetch(`${API_URL}/jobs`, { signal: controller.signal }),
-                fetch(`${API_URL}/notices`, { signal: controller.signal })
+                fetch(`${API_URL}/hackathons`, { signal: controller.signal })
             ]);
 
             clearTimeout(timeoutId);
 
             const jobsData = await jobsRes.json();
-            const noticesData = await noticesRes.json();
+            const hackathonsData = await hackathonsRes.json();
 
             if (jobsData.success) {
                 setJobs(jobsData.jobs);
                 localStorage.setItem('cachedJobs', JSON.stringify(jobsData.jobs));
             }
-            if (noticesData.success) {
-                setNotices(noticesData.notices);
-                localStorage.setItem('cachedNotices', JSON.stringify(noticesData.notices));
+            if (hackathonsData.success) {
+                setHackathons(hackathonsData.hackathons);
+                localStorage.setItem('cachedHackathons', JSON.stringify(hackathonsData.hackathons));
             }
         } catch (error) {
             console.warn('Initial fetch failed or timed out. Falling back to local cache.', error);
             
             // Load from cache
             const cachedJobs = localStorage.getItem('cachedJobs');
-            const cachedNotices = localStorage.getItem('cachedNotices');
+            const cachedHackathons = localStorage.getItem('cachedHackathons');
             
             if (cachedJobs) setJobs(JSON.parse(cachedJobs));
-            if (cachedNotices) setNotices(JSON.parse(cachedNotices));
+            if (cachedHackathons) setHackathons(JSON.parse(cachedHackathons));
 
             // Background retry for fresh data (waits for backend cold start)
             backgroundRetry();
@@ -55,21 +55,21 @@ export function useWebSocket() {
     const backgroundRetry = async () => {
         console.log('Initiating background retry to fetch fresh data...');
         try {
-            const [jobsRes, noticesRes] = await Promise.all([
+            const [jobsRes, hackathonsRes] = await Promise.all([
                 fetch(`${API_URL}/jobs`),
-                fetch(`${API_URL}/notices`)
+                fetch(`${API_URL}/hackathons`)
             ]);
 
             const jobsData = await jobsRes.json();
-            const noticesData = await noticesRes.json();
+            const hackathonsData = await hackathonsRes.json();
 
             if (jobsData.success) {
                 setJobs(jobsData.jobs);
                 localStorage.setItem('cachedJobs', JSON.stringify(jobsData.jobs));
             }
-            if (noticesData.success) {
-                setNotices(noticesData.notices);
-                localStorage.setItem('cachedNotices', JSON.stringify(noticesData.notices));
+            if (hackathonsData.success) {
+                setHackathons(hackathonsData.hackathons);
+                localStorage.setItem('cachedHackathons', JSON.stringify(hackathonsData.hackathons));
             }
             console.log('Background retry successful. Fresh data loaded.');
         } catch (error) {
@@ -101,11 +101,11 @@ export function useWebSocket() {
                     if (data.type === 'new_job') {
                         console.log('📨 New job received:', data.data);
                         setJobs((prevJobs) => [data.data, ...prevJobs]);
-                    } else if (data.type === 'new_notice') {
-                        console.log('📨 New notice received:', data.data);
-                        setNotices((prevNotices) => {
-                            const updated = [data.data, ...prevNotices];
-                            return updated.slice(0, 7); // Keep only last 7
+                    } else if (data.type === 'new_hackathon') {
+                        console.log('📨 New hackathon received:', data.data);
+                        setHackathons((prevHackathons) => {
+                            const updated = [data.data, ...prevHackathons];
+                            return updated.slice(0, 20); // Keep last 20
                         });
                     }
                 } catch (error) {
@@ -166,16 +166,19 @@ export function useWebSocket() {
         };
     }, []);
 
-    // Remove expired jobs every minute
+    // Remove expired jobs and hackathons every minute
     useEffect(() => {
         const interval = setInterval(() => {
             setJobs((prevJobs) =>
                 prevJobs.filter(job => new Date(job.expiresAt) > new Date())
+            );
+            setHackathons((prevHackathons) =>
+                prevHackathons.filter(hack => new Date(hack.expiresAt) > new Date())
             );
         }, 60000);
 
         return () => clearInterval(interval);
     }, []);
 
-    return { jobs, notices, connectionState, wsRef };
+    return { jobs, hackathons, connectionState, wsRef };
 }

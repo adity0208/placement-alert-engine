@@ -1,7 +1,7 @@
 # ============================================
 # PLACEMENT ALERT SYSTEM - .gitignore
 # ============================================
-
+RESUME_TALKING_POINTS.md
 # ==================== Dependencies ====================
 node_modules/
 package-lock.json
