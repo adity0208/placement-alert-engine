@@ -1,24 +1,45 @@
 import { GoogleGenAI } from '@google/genai';
+import Groq from 'groq-sdk';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-let ai = null;
-const apiKey = process.env.GEMINI_API_KEY;
+// Initialize Gemini Client
+let geminiClient = null;
+const geminiKey = process.env.GEMINI_API_KEY;
 
-if (!apiKey) {
-  console.warn("⚠️ WARNING: GEMINI_API_KEY is not defined in environment variables. Running in local fallback mode (Regex/Keywords classification).");
-} else {
+if (geminiKey) {
   try {
-    ai = new GoogleGenAI({ apiKey });
-    console.log("🚀 Google GenAI SDK initialized successfully.");
+    geminiClient = new GoogleGenAI({ apiKey: geminiKey });
+    console.log("🚀 Google GenAI SDK (Gemini) initialized successfully.");
   } catch (error) {
     console.error("❌ Failed to initialize GoogleGenAI client:", error.message);
   }
+} else {
+  console.warn("⚠️ GEMINI_API_KEY is not defined.");
+}
+
+// Initialize Groq Client
+let groqClient = null;
+const groqKey = process.env.GROQ_API_KEY;
+
+if (groqKey) {
+  try {
+    groqClient = new Groq({ apiKey: groqKey });
+    console.log("⚡ Groq SDK initialized successfully.");
+  } catch (error) {
+    console.error("❌ Failed to initialize Groq client:", error.message);
+  }
+} else {
+  console.warn("⚠️ GROQ_API_KEY is not defined.");
+}
+
+if (!geminiClient && !groqClient) {
+  console.warn("⚠️ Running in local fallback mode (Regex/Keywords classification).");
 }
 
 /**
- * Fallback parser using regex and keywords when Gemini API is unavailable
+ * Fallback parser using regex and keywords when AI APIs are unavailable
  * @param {string} text - Raw message text
  * @returns {Object} Structured data
  */
@@ -42,7 +63,6 @@ function localFallbackParse(text) {
   const isHackathon = HACKATHON_KEYWORDS.some(k => textLower.includes(k));
 
   if (isHackathon) {
-    // Try to guess organizer or title
     let organizer = 'Contest Host';
     const hostMatch = text.match(/(?:by|at|on)\s+([A-Za-z0-9&.,'\- ]+?)[\s,.\n]/i);
     if (hostMatch) {
@@ -69,7 +89,6 @@ function localFallbackParse(text) {
   const isJob = JOB_KEYWORDS.some(k => textLower.includes(k)) || applyLink;
 
   if (isJob) {
-    // Try to parse simple company name
     let companyName = 'Placement Opportunity';
     const hiringAtMatch = text.match(/(?:hiring|opening|drive|at)\s+([A-Za-z0-9&.,'\- ]+?)[\s,.\n]/i);
     if (hiringAtMatch) {
@@ -98,10 +117,102 @@ function localFallbackParse(text) {
 }
 
 /**
- * Parses raw Telegram message text using Gemini to classify and extract structured details.
- * Determines if it's a job, hackathon, or other message, and returns structured data.
+ * Parse using Gemini 2.0 Flash
+ */
+async function parseWithGemini(rawTelegramText) {
+  const prompt = `
+    You are an expert academic and placement cell operations assistant. 
+    Analyze the following raw notification text and extract the details in JSON.
+    
+    1. Classify the notification:
+       - 'job': If it is a job recruitment post, off-campus drive, career hiring link, or internship hiring drive.
+       - 'hackathon': If it is a coding competition, hackathon contest, programming challenge, capture the flag (CTF), or ideathon.
+       - 'other': If it is a general notice, selection results list, greetings, or unrelated academic notices.
+       
+    2. Extract fields according to the class type. Set fields to null if not present.
+    
+    Raw Text:
+    "${rawTelegramText}"
+  `;
+
+  const response = await geminiClient.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          type: { type: 'STRING', description: 'Classification: "job", "hackathon", or "other"' },
+          companyName: { type: 'STRING', description: 'For jobs: The exact name of the hiring company. Otherwise: null.' },
+          title: { type: 'STRING', description: 'For hackathons: Title or theme of event. Otherwise: null.' },
+          jobRole: { type: 'STRING', description: 'For jobs: Job designation/title. Otherwise: null.' },
+          deadline: { type: 'STRING', description: 'Deadline date/time or null' },
+          applyLink: { type: 'STRING', description: 'Exact application or registration URL' },
+          eligibility: { type: 'STRING', description: 'Brief summary of branches/criteria' },
+          experience: { type: 'STRING', description: 'Required experience level or null' },
+          targetBatch: { type: 'STRING', description: 'Target graduation batches or null' },
+          organizer: { type: 'STRING', description: 'For hackathons: Host, organizer or platform. Otherwise: null.' },
+          prizePool: { type: 'STRING', description: 'For hackathons: Prize money details or null.' }
+        },
+        required: ['type']
+      }
+    }
+  });
+
+  const jsonString = response.text?.trim();
+  if (!jsonString) throw new Error("Empty response from Gemini API");
+  return JSON.parse(jsonString);
+}
+
+/**
+ * Parse using Groq API (llama-3.3-70b-versatile)
+ */
+async function parseWithGroq(rawTelegramText) {
+  const prompt = `
+You are an expert placement cell operations assistant. Analyze this notification and return JSON ONLY with no markdown wrapping.
+
+Classification Rules:
+- "job": Job post, hiring drive, career link, internship.
+- "hackathon": Coding competition, hackathon, challenge, ideathon, CTF.
+- "other": Results list, selection greetings, general notices.
+
+Required JSON Structure:
+{
+  "type": "job" | "hackathon" | "other",
+  "companyName": string | null,
+  "title": string | null,
+  "jobRole": string | null,
+  "deadline": string | null,
+  "applyLink": string | null,
+  "eligibility": string | null,
+  "experience": string | null,
+  "targetBatch": string | null,
+  "organizer": string | null,
+  "prizePool": string | null
+}
+
+Raw Text:
+"${rawTelegramText}"
+  `;
+
+  const completion = await groqClient.chat.completions.create({
+    messages: [{ role: 'user', content: prompt }],
+    model: 'llama-3.3-70b-versatile',
+    response_format: { type: 'json_object' }
+  });
+
+  const jsonString = completion.choices[0]?.message?.content?.trim();
+  if (!jsonString) throw new Error("Empty response from Groq API");
+  return JSON.parse(jsonString);
+}
+
+/**
+ * Parses raw Telegram message text with multi-level AI failover:
+ * Gemini API -> Groq API -> Local Regex Fallback
  * 
  * @param {string} rawTelegramText - Raw message text from Telegram
+ * @param {boolean} forceLocal - Force local regex mode
  * @returns {Promise<Object>} Structured classification and details object
  */
 export async function parseJobMessage(rawTelegramText, forceLocal = false) {
@@ -123,108 +234,49 @@ export async function parseJobMessage(rawTelegramText, forceLocal = false) {
     return fallbackStructure;
   }
 
-  if (!ai || forceLocal) {
+  if (forceLocal || (!geminiClient && !groqClient)) {
     return localFallbackParse(rawTelegramText);
   }
 
-  const prompt = `
-    You are an expert academic and placement cell operations assistant. 
-    Analyze the following raw notification text and extract the details.
-    
-    1. First, classify the notification:
-       - 'job': If it is a job recruitment post, off-campus drive, career hiring link, or internship hiring drive.
-       - 'hackathon': If it is a coding competition, hackathon contest, programming challenge, capture the flag (CTF), or ideathon.
-       - 'other': If it is a general notice, selection results list, greetings, or unrelated academic notices.
-       
-    2. Extract fields according to the class type. Set fields to null if they are not relevant or not present in the text.
-    
-    Raw Text:
-    "${rawTelegramText}"
-  `;
+  let cleanData = null;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'OBJECT',
-          properties: {
-            type: { 
-              type: 'STRING', 
-              description: 'Classification: "job", "hackathon", or "other"' 
-            },
-            companyName: { 
-              type: 'STRING',
-              description: 'For jobs: The exact name of the hiring company. Otherwise: null.' 
-            },
-            title: { 
-              type: 'STRING',
-              description: 'For hackathons: The title or theme of the hackathon event. Otherwise: null.' 
-            },
-            jobRole: { 
-              type: 'STRING',
-              description: 'For jobs: The job designation/title (e.g. Software Engineer, Intern). Otherwise: null.' 
-            },
-            deadline: { 
-              type: 'STRING',
-              description: 'The deadline or registration closing date/time (e.g., "July 10, 2026" or null)' 
-            },
-            applyLink: { 
-              type: 'STRING',
-              description: 'The exact application URL or registration link found in the text' 
-            },
-            eligibility: { 
-              type: 'STRING',
-              description: 'Brief summary of branches/degrees/criteria' 
-            },
-            experience: { 
-              type: 'STRING',
-              description: 'For jobs: Required experience level (e.g. "Freshers", "1+ Years", "2026 Batch only"). Otherwise: null.' 
-            },
-            targetBatch: { 
-              type: 'STRING',
-              description: 'For jobs: Target graduation batches (e.g. "2026 passout", "2027 Batch", "Any Batch"). Otherwise: null.' 
-            },
-            organizer: { 
-              type: 'STRING',
-              description: 'For hackathons: Host, organizer or platform. Otherwise: null.' 
-            },
-            prizePool: { 
-              type: 'STRING',
-              description: 'For hackathons: Total prize money or rewards detail. Otherwise: null.' 
-            }
-          },
-          required: ['type']
-        }
-      }
-    });
-
-    const jsonString = response.text?.trim();
-    if (!jsonString) {
-      console.warn("⚠️ Received empty response from Gemini API");
-      return localFallbackParse(rawTelegramText);
+  // Level 1: Try Gemini API
+  if (geminiClient) {
+    try {
+      cleanData = await parseWithGemini(rawTelegramText);
+      console.log("🚀 Successfully parsed message using Gemini API.");
+    } catch (geminiError) {
+      console.warn("⚠️ Gemini API failed/rate-limited:", geminiError.message);
     }
-
-    const cleanData = JSON.parse(jsonString);
-    
-    return {
-      type: cleanData.type || 'other',
-      companyName: cleanData.companyName || null,
-      title: cleanData.title || (cleanData.type === 'job' ? 'Job Opportunity' : 'Hackathon Event'),
-      jobRole: cleanData.jobRole || null,
-      deadline: cleanData.deadline || null,
-      applyLink: cleanData.applyLink || null,
-      eligibility: cleanData.eligibility || null,
-      experience: cleanData.experience || null,
-      targetBatch: cleanData.targetBatch || null,
-      organizer: cleanData.organizer || null,
-      prizePool: cleanData.prizePool || null
-    };
-
-  } catch (error) {
-    console.error("❌ AI Parsing Error:", error.message);
-    return localFallbackParse(rawTelegramText);
   }
+
+  // Level 2: Failover to Groq API if Gemini failed or is unconfigured
+  if (!cleanData && groqClient) {
+    try {
+      cleanData = await parseWithGroq(rawTelegramText);
+      console.log("⚡ Successfully parsed message using Groq API (Failover).");
+    } catch (groqError) {
+      console.warn("⚠️ Groq API failed:", groqError.message);
+    }
+  }
+
+  // Level 3: Failover to Local Regex Parser if both AI providers failed
+  if (!cleanData) {
+    console.warn("⚠️ All AI APIs failed. Using local regex fallback parser.");
+    cleanData = localFallbackParse(rawTelegramText);
+  }
+
+  return {
+    type: cleanData.type || 'other',
+    companyName: cleanData.companyName || null,
+    title: cleanData.title || (cleanData.type === 'job' ? 'Job Opportunity' : 'Hackathon Event'),
+    jobRole: cleanData.jobRole || null,
+    deadline: cleanData.deadline || null,
+    applyLink: cleanData.applyLink || null,
+    eligibility: cleanData.eligibility || null,
+    experience: cleanData.experience || null,
+    targetBatch: cleanData.targetBatch || null,
+    organizer: cleanData.organizer || null,
+    prizePool: cleanData.prizePool || null
+  };
 }
