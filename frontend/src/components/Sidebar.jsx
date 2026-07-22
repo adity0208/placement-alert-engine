@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { Target, Briefcase, Trophy, Radio, Menu, X, Hash, Sparkles } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 
 export default function Sidebar({ 
@@ -10,6 +12,8 @@ export default function Sidebar({
     selectedSource, 
     setSelectedSource 
 }) {
+    const [isMobileOpen, setIsMobileOpen] = useState(false);
+
     let statusColor, statusText;
     if (connectionState === 'connected') {
         statusColor = 'connected';
@@ -22,86 +26,125 @@ export default function Sidebar({
         statusText = 'Reconnecting...';
     }
 
+    const handleNavClick = (page) => {
+        setCurrentPage(page);
+        setIsMobileOpen(false);
+    };
+
+    const handleSourceClick = (source) => {
+        setSelectedSource(source);
+        setIsMobileOpen(false);
+    };
+
     return (
-        <aside className="sidebar">
-            <div className="sidebar-header">
-                <div className="logo">🎯</div>
-                <h1 className="sidebar-title">Placement Alerts</h1>
-            </div>
-
-            <nav className="sidebar-nav">
-                <div className="sidebar-nav-section-title">CATEGORIES</div>
-                
-                <button
-                    className={`nav-item ${currentPage === 'jobs' ? 'active' : ''}`}
-                    onClick={() => setCurrentPage('jobs')}
-                >
-                    <span className="nav-icon">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
-                            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
-                        </svg>
-                    </span>
-                    <span className="nav-label">Jobs</span>
-                    {jobsCount > 0 && <span className="badge">{jobsCount}</span>}
-                </button>
-
-                <button
-                    className={`nav-item ${currentPage === 'hackathons' ? 'active' : ''}`}
-                    onClick={() => setCurrentPage('hackathons')}
-                >
-                    <span className="nav-icon">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3z"></path>
-                            <path d="M6 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3z"></path>
-                            <path d="M18 8H6"></path>
-                            <path d="M18 16H6"></path>
-                        </svg>
-                    </span>
-                    <span className="nav-label">Hackathons</span>
-                    {hackathonsCount > 0 && <span className="badge">{hackathonsCount}</span>}
-                </button>
-
-                {/* Sources filtering section */}
-                <div className="sidebar-separator" />
-                <div className="sidebar-nav-section-title">TARGET SOURCES</div>
-                
-                <button
-                    className={`nav-item source-item ${selectedSource === 'all' ? 'active' : ''}`}
-                    onClick={() => setSelectedSource('all')}
-                >
-                    <span className="source-dot all-dot" />
-                    <span className="nav-label">All Channels</span>
-                </button>
-
-                <div className="sources-scroll-container">
-                    {sources.map((source) => (
-                        <button
-                            key={source}
-                            className={`nav-item source-item ${selectedSource === source ? 'active' : ''}`}
-                            onClick={() => setSelectedSource(source)}
-                            title={source}
-                        >
-                            <span className="source-dot hash-dot">#</span>
-                            <span className="nav-label source-label-truncate">{source}</span>
-                        </button>
-                    ))}
+        <>
+            {/* Top mobile navbar bar for PWA / mobile screens */}
+            <div className="mobile-header">
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => setIsMobileOpen(!isMobileOpen)}
+                        className="mobile-menu-btn"
+                        aria-label="Toggle navigation menu"
+                    >
+                        {isMobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+                    </button>
+                    <div className="mobile-brand">
+                        <Target className="w-5 h-5 shrink-0" />
+                        <span className="font-bold text-sm">Placement Alerts</span>
+                    </div>
                 </div>
-            </nav>
 
-            <div className="sidebar-footer">
-                <ThemeToggle />
-
-                <div
-                    className={`sidebar-conn-indicator ${statusColor}`}
-                    title={statusText}
-                >
-                    <span className="status-dot" />
-                    <span className="sidebar-conn-label">
-                        {statusText}
-                    </span>
+                <div className="flex items-center gap-2">
+                    <div className={`sidebar-conn-indicator ${statusColor} mobile-conn-badge`}>
+                        <span className="status-dot" />
+                        <span className="sidebar-conn-label">{statusText}</span>
+                    </div>
                 </div>
             </div>
-        </aside>
+
+            {/* Mobile backdrop overlay */}
+            {isMobileOpen && (
+                <div 
+                    className="mobile-backdrop"
+                    onClick={() => setIsMobileOpen(false)}
+                />
+            )}
+
+            {/* Sidebar drawer container */}
+            <aside className={`sidebar ${isMobileOpen ? 'mobile-open' : ''}`}>
+                <div className="sidebar-header">
+                    <div className="logo-wrapper">
+                        <Target className="w-5 h-5 shrink-0" />
+                    </div>
+                    <h1 className="sidebar-title">Placement Alerts</h1>
+                </div>
+
+                <nav className="sidebar-nav">
+                    <div className="sidebar-nav-section-title">CATEGORIES</div>
+                    
+                    <button
+                        className={`nav-item ${currentPage === 'jobs' ? 'active' : ''}`}
+                        onClick={() => handleNavClick('jobs')}
+                    >
+                        <span className="nav-icon">
+                            <Briefcase className="w-4 h-4" />
+                        </span>
+                        <span className="nav-label">Jobs</span>
+                        {jobsCount > 0 && <span className="badge">{jobsCount}</span>}
+                    </button>
+
+                    <button
+                        className={`nav-item ${currentPage === 'hackathons' ? 'active' : ''}`}
+                        onClick={() => handleNavClick('hackathons')}
+                    >
+                        <span className="nav-icon">
+                            <Trophy className="w-4 h-4" />
+                        </span>
+                        <span className="nav-label">Hackathons</span>
+                        {hackathonsCount > 0 && <span className="badge">{hackathonsCount}</span>}
+                    </button>
+
+                    {/* Sources filtering section */}
+                    <div className="sidebar-separator" />
+                    <div className="sidebar-nav-section-title">TARGET SOURCES</div>
+                    
+                    <button
+                        className={`nav-item source-item ${selectedSource === 'all' ? 'active' : ''}`}
+                        onClick={() => handleSourceClick('all')}
+                    >
+                        <Radio className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                        <span className="nav-label">All Channels</span>
+                    </button>
+
+                    <div className="sources-scroll-container">
+                        {sources.map((source) => (
+                            <button
+                                key={source}
+                                className={`nav-item source-item ${selectedSource === source ? 'active' : ''}`}
+                                onClick={() => handleSourceClick(source)}
+                                title={source}
+                            >
+                                <Hash className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                                <span className="nav-label source-label-truncate">{source}</span>
+                            </button>
+                        ))}
+                    </div>
+                </nav>
+
+                <div className="sidebar-footer">
+                    <ThemeToggle />
+
+                    <div
+                        className={`sidebar-conn-indicator ${statusColor}`}
+                        title={statusText}
+                    >
+                        <span className="status-dot" />
+                        <span className="sidebar-conn-label">
+                            {statusText}
+                        </span>
+                    </div>
+                </div>
+            </aside>
+        </>
     );
 }

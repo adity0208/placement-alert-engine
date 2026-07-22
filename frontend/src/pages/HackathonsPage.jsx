@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Search, X, SearchX, Trophy } from 'lucide-react';
 import HackathonCard from '../components/HackathonCard';
 
 export default function HackathonsPage({ hackathons }) {
@@ -28,7 +29,7 @@ export default function HackathonsPage({ hackathons }) {
 
             {/* Search bar */}
             <div className="search-bar-wrapper">
-                <span className="search-icon">🔍</span>
+                <Search className="search-icon w-4 h-4" />
                 <input
                     type="text"
                     className="search-bar"
@@ -41,20 +42,23 @@ export default function HackathonsPage({ hackathons }) {
                         className="search-clear"
                         onClick={() => setSearchQuery('')}
                         title="Clear search"
+                        aria-label="Clear search"
                     >
-                        ✕
+                        <X className="w-4 h-4" />
                     </button>
                 )}
             </div>
 
             {filteredHackathons.length === 0 ? (
                 <div className="empty-state">
-                    <div className="empty-icon">{searchQuery ? '🔎' : '🏆'}</div>
+                    <div className="empty-icon-wrapper">
+                        {searchQuery ? <SearchX className="w-10 h-10 text-zinc-400" /> : <Trophy className="w-10 h-10 text-zinc-400" />}
+                    </div>
                     <h3>{searchQuery ? 'No matching hackathons' : 'No Active Hackathons'}</h3>
                     <p>
                         {searchQuery
                             ? `No results for "${searchQuery}"`
-                            : 'New contests and challenges will appear here'}
+                            : 'New contests and challenges will appear here automatically'}
                     </p>
                 </div>
             ) : (

@@ -1,4 +1,27 @@
 import { useState, useEffect } from 'react';
+import { 
+    Clock, 
+    Zap, 
+    Radio, 
+    GraduationCap, 
+    Building2, 
+    Calendar, 
+    ExternalLink, 
+    Copy, 
+    Check, 
+    ChevronDown, 
+    ChevronRight,
+    Briefcase,
+    AlertCircle
+} from 'lucide-react';
+
+// Strip repetitive raw LLM prefix labels (e.g. "Company name: Google" -> "Google")
+function cleanPrefix(text) {
+    if (!text || typeof text !== 'string') return text;
+    return text
+        .replace(/^(company\s*name|company|job\s*role|role|title|organization|host|organizer)\s*:\s*/i, '')
+        .trim();
+}
 
 // Extract first URL found anywhere in a string
 function extractUrl(text) {
@@ -71,6 +94,7 @@ export default function JobCard({ job }) {
     const [timeRemaining, setTimeRemaining] = useState('');
     const [isExpiringSoon, setIsExpiringSoon] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
+    const [copied, setCopied] = useState(false);
 
     useEffect(() => {
         const updateTimer = () => {
@@ -107,18 +131,28 @@ export default function JobCard({ job }) {
         });
     };
 
+    const handleCopy = () => {
+        navigator.clipboard.writeText(job?.message || '');
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
     // Determine raw title URL checks for fallback
     const rawTitle = job?.title || '';
     const isTitleUrl = /^https?:\/\//i.test(rawTitle.trim());
 
-    // Resolve presentation text using structured AI fields with bulletproof fallbacks
+    // Resolve presentation text using structured AI fields with bulletproof fallbacks and prefix sanitization
     const isAI = !!job?.isAIParsed;
-    const companyName = isAI ? (job.companyName || "New Opportunity") : (isTitleUrl ? "Job Opportunity" : parseTitle(job?.message || rawTitle));
-    const jobRole = isAI ? (job.jobRole || "Placement Drive") : "Placement Alert";
-    const eligibility = isAI ? job.eligibility : extractAudience(job?.message || rawTitle);
-    const deadline = isAI ? job.deadline : null;
-    const experience = job?.experience;
-    const targetBatch = job?.targetBatch;
+    const rawCompany = isAI ? (job.companyName || "New Opportunity") : (isTitleUrl ? "Job Opportunity" : parseTitle(job?.message || rawTitle));
+    const rawRole = isAI ? (job.jobRole || "Placement Drive") : "Placement Alert";
+
+    const companyName = cleanPrefix(rawCompany);
+    const jobRole = cleanPrefix(rawRole);
+
+    const eligibility = cleanPrefix(isAI ? job.eligibility : extractAudience(job?.message || rawTitle));
+    const deadline = cleanPrefix(isAI ? job.deadline : null);
+    const experience = cleanPrefix(job?.experience);
+    const targetBatch = cleanPrefix(job?.targetBatch);
     const sourceName = job?.sourceName;
 
     // Resolve application URL
@@ -127,7 +161,7 @@ export default function JobCard({ job }) {
     // Strip salutation for a clean presentation
     const displayMessage = (job?.message || '').replace(/^dear\s+(b\.?tech\s+)?(\w+\s+)?students?,?\s*/i, '').trim();
 
-    const avatarLetter = companyName ? companyName.charAt(0).toUpperCase() : '💼';
+    const avatarLetter = companyName ? companyName.charAt(0).toUpperCase() : 'B';
 
     return (
         <div className={`job-card ${isExpiringSoon ? 'expiring-soon' : ''}`}>
@@ -146,40 +180,47 @@ export default function JobCard({ job }) {
             <div style={{ marginTop: '0.25rem' }}>
                 <div className="job-meta">
                     <span className="meta-item">
-                        🕒 {formatDate(job?.createdAt)}
+                        <Clock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                        {formatDate(job?.createdAt)}
                     </span>
                     {timeRemaining && (
                         <span className={`meta-item timer ${timeRemaining === 'Expired' ? 'expired' : ''}`}>
-                            ⚡ {timeRemaining}
+                            <Zap className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                            {timeRemaining}
                         </span>
                     )}
                     {sourceName && (
                         <span className="meta-item">
-                            📡 {sourceName}
+                            <Radio className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                            {sourceName}
                         </span>
                     )}
                 </div>
 
-                {/* Flat tag pills */}
+                {/* Flat monochrome tag pills */}
                 <div className="badge-container">
                     {targetBatch && (
                         <span className="premium-badge">
-                            🎓 Batch: {targetBatch}
+                            <GraduationCap className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                            <span>Batch: {targetBatch}</span>
                         </span>
                     )}
                     {experience && (
                         <span className="premium-badge">
-                            💼 Experience: {experience}
+                            <Building2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                            <span>Experience: {experience}</span>
                         </span>
                     )}
                     {eligibility && (
                         <span className="premium-badge">
-                            📋 Criteria: {eligibility}
+                            <Briefcase className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                            <span>Criteria: {eligibility}</span>
                         </span>
                     )}
                     {deadline && (
                         <span className="premium-badge">
-                            📅 Deadline: {deadline}
+                            <Calendar className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                            <span>Deadline: {deadline}</span>
                         </span>
                     )}
                 </div>
@@ -188,10 +229,11 @@ export default function JobCard({ job }) {
             {/* Accordion collapsable toggle */}
             <button 
                 onClick={() => setIsExpanded(!isExpanded)} 
-                className="accordion-trigger"
+                className="accordion-trigger flex items-center justify-between"
                 aria-expanded={isExpanded}
             >
-                {isExpanded ? '▼ Hide Details' : '▶ Show Message Details'}
+                <span>{isExpanded ? 'Hide Details' : 'Show Message Details'}</span>
+                {isExpanded ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
             </button>
 
             <div className={`accordion-content ${isExpanded ? 'expanded' : ''}`}>
@@ -207,18 +249,30 @@ export default function JobCard({ job }) {
                         rel="noopener noreferrer"
                         className="btn btn-primary"
                     >
-                        🔗 Apply Now
+                        <ExternalLink className="w-4 h-4 shrink-0 mr-1.5" />
+                        Apply Now
                     </a>
                 ) : (
                     <button className="btn disabled" disabled>
-                        ❌ Link Not Found
+                        <AlertCircle className="w-4 h-4 shrink-0 mr-1.5" />
+                        Link Not Found
                     </button>
                 )}
                 <button
-                    onClick={() => navigator.clipboard.writeText(job?.message || '')}
+                    onClick={handleCopy}
                     className="btn btn-secondary"
                 >
-                    📋 Copy
+                    {copied ? (
+                        <>
+                            <Check className="w-4 h-4 shrink-0 mr-1.5 text-emerald-500" />
+                            Copied
+                        </>
+                    ) : (
+                        <>
+                            <Copy className="w-4 h-4 shrink-0 mr-1.5" />
+                            Copy
+                        </>
+                    )}
                 </button>
             </div>
         </div>

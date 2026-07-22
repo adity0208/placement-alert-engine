@@ -1,4 +1,26 @@
 import { useState } from 'react';
+import { 
+    Trophy, 
+    Clock, 
+    Radio, 
+    Building2, 
+    Award, 
+    Calendar, 
+    ExternalLink, 
+    Copy, 
+    Check, 
+    ChevronDown, 
+    ChevronRight,
+    AlertCircle
+} from 'lucide-react';
+
+// Strip repetitive raw LLM prefix labels
+function cleanPrefix(text) {
+    if (!text || typeof text !== 'string') return text;
+    return text
+        .replace(/^(hackathon\s*title|title|host|organizer|prize\s*pool|prizes?)\s*:\s*/i, '')
+        .trim();
+}
 
 // Extract first URL found anywhere in a string
 function extractUrl(text) {
@@ -9,6 +31,7 @@ function extractUrl(text) {
 
 export default function HackathonCard({ hackathon }) {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [copied, setCopied] = useState(false);
 
     const formatDate = (dateString) => {
         if (!dateString) return '';
@@ -21,10 +44,16 @@ export default function HackathonCard({ hackathon }) {
         });
     };
 
-    const title = hackathon?.title || 'Hackathon Event';
-    const organizer = hackathon?.organizer || 'Contest Host';
-    const prizePool = hackathon?.prizePool;
-    const deadline = hackathon?.deadline;
+    const handleCopy = () => {
+        navigator.clipboard.writeText(hackathon?.message || '');
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    const title = cleanPrefix(hackathon?.title || 'Hackathon Event');
+    const organizer = cleanPrefix(hackathon?.organizer || 'Contest Host');
+    const prizePool = cleanPrefix(hackathon?.prizePool);
+    const deadline = cleanPrefix(hackathon?.deadline);
     const sourceName = hackathon?.sourceName || 'Unknown Source';
 
     // Resolve URL
@@ -33,7 +62,7 @@ export default function HackathonCard({ hackathon }) {
     // Strip salutations
     const displayMessage = (hackathon?.message || '').replace(/^dear\s+(b\.?tech\s+)?(\w+\s+)?students?,?\s*/i, '').trim();
 
-    const avatarLetter = organizer ? organizer.charAt(0).toUpperCase() : '🏆';
+    const avatarLetter = organizer ? organizer.charAt(0).toUpperCase() : 'H';
 
     return (
         <div className="job-card hackathon-card">
@@ -43,7 +72,9 @@ export default function HackathonCard({ hackathon }) {
                     {avatarLetter}
                 </div>
                 <div className="job-header-info">
-                    <span className="job-role-text">🏆 Hackathon Event</span>
+                    <span className="job-role-text flex items-center gap-1">
+                        <Trophy className="w-3 h-3 text-zinc-400" /> Hackathon Event
+                    </span>
                     <h3 className="job-company-name">{title}</h3>
                 </div>
             </div>
@@ -52,11 +83,13 @@ export default function HackathonCard({ hackathon }) {
             <div style={{ marginTop: '0.25rem' }}>
                 <div className="job-meta">
                     <span className="meta-item">
-                        🕒 {formatDate(hackathon?.createdAt)}
+                        <Clock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                        {formatDate(hackathon?.createdAt)}
                     </span>
                     {sourceName && (
                         <span className="meta-item">
-                            📡 {sourceName}
+                            <Radio className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                            {sourceName}
                         </span>
                     )}
                 </div>
@@ -65,17 +98,20 @@ export default function HackathonCard({ hackathon }) {
                 <div className="badge-container">
                     {organizer && (
                         <span className="premium-badge">
-                            🏢 Organizer: {organizer}
+                            <Building2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                            <span>Organizer: {organizer}</span>
                         </span>
                     )}
                     {prizePool && (
                         <span className="premium-badge">
-                            💰 Prize Pool: {prizePool}
+                            <Award className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                            <span>Prize Pool: {prizePool}</span>
                         </span>
                     )}
                     {deadline && (
                         <span className="premium-badge">
-                            📅 Deadline: {deadline}
+                            <Calendar className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                            <span>Deadline: {deadline}</span>
                         </span>
                     )}
                 </div>
@@ -84,10 +120,11 @@ export default function HackathonCard({ hackathon }) {
             {/* Accordion toggle */}
             <button 
                 onClick={() => setIsExpanded(!isExpanded)} 
-                className="accordion-trigger"
+                className="accordion-trigger flex items-center justify-between"
                 aria-expanded={isExpanded}
             >
-                {isExpanded ? '▼ Hide Details' : '▶ Show Contest Description'}
+                <span>{isExpanded ? 'Hide Details' : 'Show Contest Description'}</span>
+                {isExpanded ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
             </button>
 
             <div className={`accordion-content ${isExpanded ? 'expanded' : ''}`}>
@@ -103,18 +140,30 @@ export default function HackathonCard({ hackathon }) {
                         rel="noopener noreferrer"
                         className="btn btn-primary"
                     >
-                        🔗 Register Now
+                        <ExternalLink className="w-4 h-4 shrink-0 mr-1.5" />
+                        Register Now
                     </a>
                 ) : (
                     <button className="btn disabled" disabled>
-                        ❌ Registration Link Not Found
+                        <AlertCircle className="w-4 h-4 shrink-0 mr-1.5" />
+                        Registration Link Not Found
                     </button>
                 )}
                 <button
-                    onClick={() => navigator.clipboard.writeText(hackathon?.message || '')}
+                    onClick={handleCopy}
                     className="btn btn-secondary"
                 >
-                    📋 Copy Info
+                    {copied ? (
+                        <>
+                            <Check className="w-4 h-4 shrink-0 mr-1.5 text-emerald-500" />
+                            Copied
+                        </>
+                    ) : (
+                        <>
+                            <Copy className="w-4 h-4 shrink-0 mr-1.5" />
+                            Copy Info
+                        </>
+                    )}
                 </button>
             </div>
         </div>
