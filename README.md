@@ -1,125 +1,135 @@
-# 🎯 Placement Alert System
+# Placement Alert Engine
 
-A production-ready real-time job alert system that monitors a specific Telegram group, filters job-related messages with duplicate protection, stores them in MongoDB with auto-expiry (24 hours), and broadcasts notifications to connected clients via WebSocket.
+A production-ready, real-time event-driven job & hackathon notification system. It monitors specified Telegram channels using the MTProto API, parses unstructured text with a **Multi-Tier AI Fallback Engine** (Gemini 2.0 Flash + Groq Llama 3.3 70B + Local Regex), prevents duplicates via MongoDB compound indexing, auto-expires stale alerts, and streams updates instantly to active clients via WebSockets.
 
-## 🏗 Architecture
+---
+
+## 🏗️ System Architecture
 
 ```
-┌─────────────────┐      ┌──────────────────┐      ┌─────────────────┐
-│  Telegram Group │─────▶│  Backend Server  │─────▶│  Frontend App   │
-│   (Private)     │      │  (Express + WS)  │      │  (React + Vite) │
-└─────────────────┘      └──────────────────┘      └─────────────────┘
-                                  │
-                                  ▼
-                         ┌──────────────────┐
-                         │  MongoDB Atlas   │
-                         │  (TTL Indexing)  │
-                         └──────────────────┘
+┌────────────────────────┐      ┌────────────────────────┐      ┌────────────────────────┐
+│  Telegram Channels     │─────▶│  GramJS Listener       │─────▶│ Multi-Tier AI Engine   │
+│  (Public / Private)    │      │  (Node.js / MTProto)   │      │ (Gemini ➔ Groq ➔ Regex) │
+└────────────────────────┘      └────────────────────────┘      └────────────────────────┘
+                                                                             │
+                                                                             ▼
+┌────────────────────────┐      ┌────────────────────────┐      ┌────────────────────────┐
+│  Frontend App          │◀─────│  WebSocket Server      │◀─────│ MongoDB Atlas          │
+│  (React + Lucide + PWA)│      │  (Express + WS)        │      │ (TTL & Compound Index) │
+└────────────────────────┘      └────────────────────────┘      └────────────────────────┘
 ```
 
-### Key Features
+---
 
-✅ **Telegram Group Targeting** - Listens only to specified `TELEGRAM_GROUP_ID`  
-✅ **Duplicate Protection** - Compound unique index prevents re-processing  
-✅ **Auto-Expiry** - MongoDB TTL index auto-deletes jobs after 24 hours  
-✅ **WebSocket Safety** - readyState checks, error handling, dead connection cleanup  
-✅ **Rate Limiting** - 10 req/min per IP on `/jobs` endpoint  
-✅ **Auto-Reconnect** - Exponential backoff for both Telegram and WebSocket  
-✅ **Structured Logging** - Color-coded logs with timestamps  
-✅ **Browser Notifications** - Real-time popup alerts for new jobs  
-✅ **Graceful Shutdown** - Proper cleanup of all connections  
+## ⚡ Core Engineering Highlights
+
+### 1. Multi-Tier AI Fallback Engine (`backend/aiParser.js`)
+To guarantee $0-downtime parsing reliability even when free-tier AI quotas are exhausted:
+* **Tier 1 (Primary AI)**: Google Gemini API (`gemini-2.0-flash` via `@google/genai`).
+* **Tier 2 (Failover AI)**: Groq API (`llama-3.3-70b-versatile` via `groq-sdk`). If Gemini returns an HTTP 429 rate limit or quota error, the system automatically routes the payload to Groq within milliseconds.
+* **Tier 3 (Local Fallback)**: Deterministic regex and keyword rules engine. If both AI services are unavailable, the local parser extracts job links, eligibility criteria, and classifications to guarantee zero data loss.
+
+### 2. High-Contrast shadcn/ui Design System
+* **Iconography**: Complete integration of `lucide-react` SVG icons. All raw inline emojis have been replaced with vector icons (`Target`, `Briefcase`, `Trophy`, `Radio`, `Zap`, `Clock`, `Building2`, `GraduationCap`, `Calendar`, `Award`, `ExternalLink`, `Copy`, `Check`).
+* **Persistent Light / Dark Mode**:
+  * **Light Mode (Default)**: Solid warm off-white background (`#FAF8F5`), deep charcoal typography (`#18181B`), and strict 1px neutral gray borders (`#E4E4E7`).
+  * **Dark Mode**: Complete pitch-black dark mode (`#000000` background, `#FAFAFA` text, `#27272A` borders) with `localStorage` persistence (`placement_theme`).
+* **Title Sanitization**: Clean title processing that strips prompt prefix residue (e.g. `"Company name:"`, `"Role:"`, `"Title:"`) via regular expressions.
+* **PWA & Mobile Navigation Drawer**: Responsive top bar and slide-over navigation drawer with backdrop blur overlay (`.mobile-backdrop`) for small-screen compliance.
+* **UX Micro-Interactions**: Interactive 2-second copy button feedback state (`<Check /> Copied`).
+
+### 3. Data Integrity & Storage Strategy
+* **Duplicate Prevention**: Compound unique indexing (`{ telegramMessageId: 1, groupId: 1 }`) prevents re-processing the same announcement.
+* **Auto-Purging TTL Index**: MongoDB TTL index (`expiresAt`) automatically deletes postings after 24-48 hours to ensure a fresh feed.
+
+---
 
 ## 📦 Tech Stack
 
 ### Backend
-- **Express** - REST API server
-- **telegram** - Telegram client library (MTProto API)
-- **ws** - WebSocket server
-- **Mongoose** - MongoDB ODM
-- **express-rate-limit** - API protection
+* **Runtime**: Node.js (ES Modules)
+* **Framework**: Express.js
+* **Real-time Protocol**: WebSockets (`ws`)
+* **Telegram Client**: GramJS (`telegram` MTProto API)
+* **AI Provider 1**: `@google/genai` (Gemini 2.0 Flash)
+* **AI Provider 2**: `groq-sdk` (Llama 3.3 70B Versatile)
+* **Database**: MongoDB Atlas via Mongoose ODM
+* **Security & Rate Limiting**: `express-rate-limit`
 
 ### Frontend
-- **React 18** - UI library
-- **Vite** - Build tool
-- **Vanilla CSS** - Minimal styling
+* **UI Framework**: React 18
+* **Build Tool**: Vite
+* **Icon System**: `lucide-react`
+* **Styling**: Vanilla CSS (TailwindCSS integration ready)
+
+---
+
+## 🔑 Environment Configuration
+
+Create `.env` files in both `backend/` and `frontend/` directories using the parameters listed below.
+
+### `backend/.env`
+
+```env
+# Telegram MTProto Credentials (https://my.telegram.org/apps)
+API_ID=your_api_id
+API_HASH=your_api_hash
+SESSION_STRING=your_gramjs_session_string
+
+# Telegram Target Channels/Groups (comma-separated IDs or handles)
+TELEGRAM_TARGETS=-1001234567890,@react_jobs
+
+# MongoDB Database URI
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/placement-alerts?retryWrites=true&w=majority
+
+# Backend Port
+PORT=5000
+
+# Primary AI Provider (Google AI Studio: https://aistudio.google.com)
+GEMINI_API_KEY=your_gemini_api_key
+
+# Secondary Failover AI Provider (Groq Console: https://console.groq.com)
+GROQ_API_KEY=your_groq_api_key
+```
+
+### `frontend/.env`
+
+```env
+VITE_WS_URL=ws://localhost:5000
+VITE_API_URL=http://localhost:5000
+```
+
+---
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- Node.js 18+ installed
-- MongoDB Atlas account (free tier)
-- Telegram account
-- GitHub account (for deployment)
-
-### 1. Clone Repository
+### 1. Clone & Install Dependencies
 
 ```bash
-git clone <your-repo-url>
-cd Placment_reminder
-```
+git clone https://github.com/adity0208/placement-alert-engine.git
+cd placement-alert-engine
 
-### 2. Backend Setup
-
-```bash
+# Install backend dependencies
 cd backend
 npm install
-```
 
-#### Get Telegram Credentials
-
-1. Visit https://my.telegram.org/apps
-2. Create a new application
-3. Copy `API_ID` and `API_HASH`
-
-#### Generate Session String
-
-```bash
-npm run generate-session
-```
-
-Follow the prompts to authenticate with your Telegram account. Copy the session string.
-
-#### Get Telegram Group ID
-
-1. Add bot [@getidsbot](https://t.me/getidsbot) to your private group
-2. Copy the group ID (format: `-1001234567890`)
-
-#### Configure Environment
-
-Create `.env` file in `backend/`:
-
-```env
-API_ID=your_api_id
-API_HASH=your_api_hash
-SESSION_STRING=your_session_string_here
-TELEGRAM_GROUP_ID=-1001234567890
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/placement-alerts
-PORT=3000
-```
-
-### 3. MongoDB Atlas Setup
-
-1. Create account at [mongodb.com/cloud/atlas](https://mongodb.com/cloud/atlas)
-2. Create free M0 cluster
-3. **Database Access** → Add user (username/password)
-4. **Network Access** → Add IP: `0.0.0.0/0` (allow all for Render compatibility)
-5. Copy connection string → Add to `.env` as `MONGODB_URI`
-
-### 4. Frontend Setup
-
-```bash
+# Install frontend dependencies
 cd ../frontend
 npm install
 ```
 
-Create `.env` file in `frontend/`:
+### 2. Generate Telegram Session String
 
-```env
-VITE_WS_URL=ws://localhost:3000
-VITE_API_URL=http://localhost:3000
+If you need a new GramJS session string:
+
+```bash
+cd backend
+npm run generate-session
 ```
 
-### 5. Run Locally
+Follow the command-line authentication prompts and copy the generated string into `SESSION_STRING` in `backend/.env`.
+
+### 3. Run Development Servers
 
 **Terminal 1 (Backend):**
 ```bash
@@ -133,171 +143,33 @@ cd frontend
 npm run dev
 ```
 
-Visit `http://localhost:5173` and send a test message to your Telegram group!
+Visit `http://localhost:5173` in your browser.
 
-## 🌐 Deployment
+---
 
-### Deploy Backend to Render
-
-1. Push code to GitHub
-2. Create account at [render.com](https://render.com)
-3. **New Web Service** → Connect repository
-4. Configure:
-   - **Build Command**: `cd backend && npm install`
-   - **Start Command**: `cd backend && npm start`
-   - **Environment Variables**: Add all from `.env`
-5. Deploy → Copy URL (e.g., `https://your-app.onrender.com`)
-
-### Deploy Frontend to Vercel
-
-1. Create account at [vercel.com](https://vercel.com)
-2. **Import repository**
-3. Configure:
-   - **Root Directory**: `frontend`
-   - **Framework**: Vite
-   - **Environment Variables**:
-     - `VITE_WS_URL=wss://your-backend.onrender.com`
-     - `VITE_API_URL=https://your-backend.onrender.com`
-4. Deploy
-
-### Keep Render Alive (Free Tier)
-
-Render free tier sleeps after 15 minutes of inactivity.
-
-1. Visit [cron-job.org](https://cron-job.org)
-2. Create free account
-3. Create new cron job:
-   - **URL**: `https://your-backend.onrender.com/`
-   - **Interval**: Every 10 minutes
-4. Save
-
-## 📊 API Endpoints
+## 📊 API & System Endpoints
 
 ### `GET /`
-Health check endpoint
+Health check endpoint returning system status and connected WebSocket clients.
 
 **Response:**
 ```json
 {
   "status": "online",
   "service": "Placement Alert System",
-  "timestamp": "2026-02-11T15:00:00.000Z",
-  "connectedClients": 5
+  "timestamp": "2026-07-22T14:00:00.000Z",
+  "connectedClients": 3
 }
 ```
 
 ### `GET /jobs`
-Get all active jobs (rate limited: 10 req/min per IP)
-
-**Response:**
-```json
-{
-  "success": true,
-  "count": 3,
-  "jobs": [
-    {
-      "_id": "...",
-      "title": "Software Engineer Opening",
-      "message": "Apply now at...",
-      "link": "https://...",
-      "createdAt": "2026-02-11T14:00:00.000Z",
-      "expiresAt": "2026-02-12T14:00:00.000Z"
-    }
-  ]
-}
-```
+Returns all active job listings (Rate-limited: 10 requests/min per IP).
 
 ### `GET /stats`
-Get system statistics
+Returns current system metrics (active jobs, total ingested jobs, and active WebSocket connections).
 
-**Response:**
-```json
-{
-  "success": true,
-  "stats": {
-    "activeJobs": 3,
-    "totalJobs": 15,
-    "connectedClients": 5
-  }
-}
-```
-
-## 🔧 Configuration
-
-### Message Filtering
-
-Jobs are accepted if:
-- Contains URL **OR**
-- Contains keywords: `apply`, `portal`, `deadline`, `drive`, `registration`, `hiring`, `opportunity`, `vacancy`
-
-Jobs are rejected if:
-- Contains: `selected`, `shortlisted`, `congratulations`, `congrats`, `rejected`, `not selected`
-
-Edit `backend/utils/filter.js` to customize.
-
-### MongoDB Indexes
-
-- **TTL Index**: `expiresAt` (auto-delete after 24h)
-- **Compound Unique**: `{telegramMessageId: 1, groupId: 1}` (prevent duplicates)
-- **Sort Index**: `createdAt: -1` (fast queries)
-
-### WebSocket Reconnection
-
-**Frontend**: Exponential backoff (1s → 2s → 4s → 8s → 16s → 30s max)  
-**Backend**: Exponential backoff (1s → 2s → 4s → ... → 60s max)
-
-## 📈 Scalability
-
-### Current Capacity (50-200 users)
-- WebSocket: 200 concurrent connections
-- MongoDB: TTL index auto-cleanup, indexed queries
-- Memory: ~100MB baseline (Render free tier: 512MB)
-- Rate limiting: 10 req/min per IP
-
-### Scale to 1000+ users
-- Add Redis for pub/sub (multiple backend instances)
-- Increase rate limits
-- Use MongoDB connection pooling
-- Implement horizontal scaling on Render
-
-## 🐛 Troubleshooting
-
-### Backend won't start
-- Check all environment variables are set
-- Verify `TELEGRAM_GROUP_ID` is a valid number
-- Ensure MongoDB URI is correct
-
-### Telegram not connecting
-- Regenerate session string
-- Check API_ID and API_HASH
-- Verify group ID is correct (negative number)
-
-### Jobs not appearing
-- Check Telegram group ID matches
-- Send message with job keywords
-- Check backend logs for filtering
-
-### WebSocket disconnecting
-- Check CORS settings
-- Verify WebSocket URL uses `wss://` for production
-- Check Render logs for errors
+---
 
 ## 📝 License
 
 MIT
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
-
-## 📧 Support
-
-For issues and questions, please open a GitHub issue.
-
----
-
-**Built with ❤️ for placement season**
