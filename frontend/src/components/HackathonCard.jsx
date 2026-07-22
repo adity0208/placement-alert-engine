@@ -21,28 +21,6 @@ export default function HackathonCard({ hackathon }) {
         });
     };
 
-    // Stable dynamic HSL color generator for organizer avatars
-    const getAvatarColor = (name) => {
-        if (!name) return 'linear-gradient(135deg, var(--accent-primary), #8b5cf6)';
-        let hash = 0;
-        for (let i = 0; i < name.length; i++) {
-            hash = name.charCodeAt(i) + ((hash << 5) - hash);
-        }
-        const h = Math.abs(hash % 360);
-        return `hsl(${h}, 60%, 40%)`;
-    };
-
-    // Stable color generator for origin sources
-    const getSourceColor = (name) => {
-        if (!name) return 'var(--text-muted)';
-        let hash = 0;
-        for (let i = 0; i < name.length; i++) {
-            hash = name.charCodeAt(i) + ((hash << 5) - hash);
-        }
-        const h = Math.abs(hash % 360);
-        return `hsl(${h}, 45%, 45%)`;
-    };
-
     const title = hackathon?.title || 'Hackathon Event';
     const organizer = hackathon?.organizer || 'Contest Host';
     const prizePool = hackathon?.prizePool;
@@ -55,15 +33,13 @@ export default function HackathonCard({ hackathon }) {
     // Strip salutations
     const displayMessage = (hackathon?.message || '').replace(/^dear\s+(b\.?tech\s+)?(\w+\s+)?students?,?\s*/i, '').trim();
 
-    const avatarBg = getAvatarColor(organizer);
-    const avatarLetter = organizer.charAt(0).toUpperCase();
-    const sourceColor = getSourceColor(sourceName);
+    const avatarLetter = organizer ? organizer.charAt(0).toUpperCase() : '🏆';
 
     return (
         <div className="job-card hackathon-card">
             {/* Top header row: Dynamic Brand Avatar + Title & Organizer */}
             <div className="job-card-top">
-                <div className="company-avatar" style={{ background: avatarBg }}>
+                <div className="company-avatar">
                     {avatarLetter}
                 </div>
                 <div className="job-header-info">
@@ -73,20 +49,13 @@ export default function HackathonCard({ hackathon }) {
             </div>
 
             {/* Sub-meta details row */}
-            <div className="job-header" style={{ marginTop: 'var(--spacing-xs)', marginBottom: 'var(--spacing-sm)' }}>
+            <div style={{ marginTop: '0.25rem' }}>
                 <div className="job-meta">
                     <span className="meta-item">
                         🕒 {formatDate(hackathon?.createdAt)}
                     </span>
                     {sourceName && (
-                        <span 
-                            className="premium-badge source-badge" 
-                            style={{ 
-                                borderColor: sourceColor, 
-                                color: sourceColor,
-                                background: `${sourceColor}0a`
-                            }}
-                        >
+                        <span className="meta-item">
                             📡 {sourceName}
                         </span>
                     )}
@@ -95,17 +64,17 @@ export default function HackathonCard({ hackathon }) {
                 {/* Tags row */}
                 <div className="badge-container">
                     {organizer && (
-                        <span className="premium-badge eligibility-badge">
+                        <span className="premium-badge">
                             🏢 Organizer: {organizer}
                         </span>
                     )}
                     {prizePool && (
-                        <span className="premium-badge experience-badge" style={{ color: '#f59e0b', background: 'rgba(245, 158, 11, 0.08)' }}>
+                        <span className="premium-badge">
                             💰 Prize Pool: {prizePool}
                         </span>
                     )}
                     {deadline && (
-                        <span className="premium-badge deadline-badge">
+                        <span className="premium-badge">
                             📅 Deadline: {deadline}
                         </span>
                     )}

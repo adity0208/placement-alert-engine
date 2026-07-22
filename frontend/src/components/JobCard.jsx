@@ -107,28 +107,6 @@ export default function JobCard({ job }) {
         });
     };
 
-    // Stable dynamic HSL color generator for company avatars
-    const getCompanyColor = (name) => {
-        if (!name) return 'linear-gradient(135deg, var(--accent-primary), #8b5cf6)';
-        let hash = 0;
-        for (let i = 0; i < name.length; i++) {
-            hash = name.charCodeAt(i) + ((hash << 5) - hash);
-        }
-        const h = Math.abs(hash % 360);
-        return `hsl(${h}, 60%, 40%)`;
-    };
-
-    // Stable HSL color generator for source labels
-    const getSourceColor = (name) => {
-        if (!name) return 'var(--text-muted)';
-        let hash = 0;
-        for (let i = 0; i < name.length; i++) {
-            hash = name.charCodeAt(i) + ((hash << 5) - hash);
-        }
-        const h = Math.abs(hash % 360);
-        return `hsl(${h}, 45%, 45%)`;
-    };
-
     // Determine raw title URL checks for fallback
     const rawTitle = job?.title || '';
     const isTitleUrl = /^https?:\/\//i.test(rawTitle.trim());
@@ -149,15 +127,13 @@ export default function JobCard({ job }) {
     // Strip salutation for a clean presentation
     const displayMessage = (job?.message || '').replace(/^dear\s+(b\.?tech\s+)?(\w+\s+)?students?,?\s*/i, '').trim();
 
-    const avatarBg = getCompanyColor(companyName);
-    const avatarLetter = companyName.charAt(0).toUpperCase();
-    const sourceColor = getSourceColor(sourceName);
+    const avatarLetter = companyName ? companyName.charAt(0).toUpperCase() : '💼';
 
     return (
         <div className={`job-card ${isExpiringSoon ? 'expiring-soon' : ''}`}>
             {/* Top header row: Dynamic Brand Avatar + Role / Company details */}
             <div className="job-card-top">
-                <div className="company-avatar" style={{ background: avatarBg }}>
+                <div className="company-avatar">
                     {avatarLetter}
                 </div>
                 <div className="job-header-info">
@@ -167,7 +143,7 @@ export default function JobCard({ job }) {
             </div>
 
             {/* Sub-meta details row */}
-            <div className="job-header" style={{ marginTop: 'var(--spacing-xs)', marginBottom: 'var(--spacing-sm)' }}>
+            <div style={{ marginTop: '0.25rem' }}>
                 <div className="job-meta">
                     <span className="meta-item">
                         🕒 {formatDate(job?.createdAt)}
@@ -178,38 +154,31 @@ export default function JobCard({ job }) {
                         </span>
                     )}
                     {sourceName && (
-                        <span 
-                            className="premium-badge source-badge" 
-                            style={{ 
-                                borderColor: sourceColor, 
-                                color: sourceColor,
-                                background: `${sourceColor}0a`
-                            }}
-                        >
+                        <span className="meta-item">
                             📡 {sourceName}
                         </span>
                     )}
                 </div>
 
-                {/* Highly visual tag pills */}
+                {/* Flat tag pills */}
                 <div className="badge-container">
                     {targetBatch && (
-                        <span className="premium-badge batch-badge" style={{ color: '#3b82f6', background: 'rgba(59, 130, 246, 0.08)' }}>
+                        <span className="premium-badge">
                             🎓 Batch: {targetBatch}
                         </span>
                     )}
                     {experience && (
-                        <span className="premium-badge experience-badge" style={{ color: '#a855f7', background: 'rgba(168, 85, 247, 0.08)' }}>
+                        <span className="premium-badge">
                             💼 Experience: {experience}
                         </span>
                     )}
                     {eligibility && (
-                        <span className="premium-badge eligibility-badge">
+                        <span className="premium-badge">
                             📋 Criteria: {eligibility}
                         </span>
                     )}
                     {deadline && (
-                        <span className="premium-badge deadline-badge">
+                        <span className="premium-badge">
                             📅 Deadline: {deadline}
                         </span>
                     )}

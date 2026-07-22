@@ -1,3 +1,5 @@
+import ThemeToggle from './ThemeToggle';
+
 export default function Sidebar({ 
     currentPage, 
     setCurrentPage, 
@@ -8,19 +10,16 @@ export default function Sidebar({
     selectedSource, 
     setSelectedSource 
 }) {
-    let statusColor, statusText, dotClass;
+    let statusColor, statusText;
     if (connectionState === 'connected') {
         statusColor = 'connected';
         statusText = 'Live';
-        dotClass = 'pulse';
     } else if (connectionState === 'connecting') {
         statusColor = 'connecting';
         statusText = 'Connecting...';
-        dotClass = 'pulse';
     } else {
         statusColor = 'disconnected';
         statusText = 'Reconnecting...';
-        dotClass = '';
     }
 
     return (
@@ -91,11 +90,13 @@ export default function Sidebar({
             </nav>
 
             <div className="sidebar-footer">
+                <ThemeToggle />
+
                 <div
                     className={`sidebar-conn-indicator ${statusColor}`}
                     title={statusText}
                 >
-                    <span className={`status-dot ${dotClass}`} />
+                    <span className="status-dot" />
                     <span className="sidebar-conn-label">
                         {statusText}
                     </span>
