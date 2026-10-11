@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import JobsPage from './pages/JobsPage';
 import HackathonsPage from './pages/HackathonsPage';
+import DashboardPage from './pages/DashboardPage';
 import { useWebSocket } from './hooks/useWebSocket';
 import './index.css';
 
@@ -122,8 +123,12 @@ function App() {
                     <ServerLoading connectionState={connectionState} />
                 ) : currentPage === 'jobs' ? (
                     <JobsPage jobs={filteredJobs} />
-                ) : (
+                ) : currentPage === 'hackathons' ? (
                     <HackathonsPage hackathons={filteredHackathons} />
+                ) : currentPage === 'dashboard' ? (
+                    <DashboardPage jobs={filteredJobs} hackathons={filteredHackathons} />
+                ) : (
+                    <JobsPage jobs={filteredJobs} />
                 )}
             </main>
         </div>

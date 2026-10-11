@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Target, Briefcase, Trophy, Radio, Menu, X, Hash, Code2, Mail } from 'lucide-react';
+import { Target, Briefcase, Trophy, Radio, Menu, X, Hash, Code2, Mail, TrendingUp } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 
 export default function Sidebar({
@@ -101,6 +101,16 @@ export default function Sidebar({
                         </span>
                         <span className="nav-label">Hackathons</span>
                         {hackathonsCount > 0 && <span className="badge">{hackathonsCount}</span>}
+                    </button>
+
+                    <button
+                        className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`}
+                        onClick={() => handleNavClick('dashboard')}
+                    >
+                        <span className="nav-icon">
+                            <TrendingUp className="w-4 h-4" />
+                        </span>
+                        <span className="nav-label">Dashboard</span>
                     </button>
 
                     {/* Sources filtering section */}

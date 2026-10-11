@@ -194,8 +194,11 @@ public
 # backend/test-*.js
 # backend/clear-db.js
 
-# Local development notes (optional)
-notes.md
-TODO.md
-SCRATCH.md
+# Ignore all Markdown files
+*.md
+NEXTJS_MIGRATION_TICKET.md
+DEVELOPER_DOCS.md
+# But do not ignore README.md
+!README.md
+
 
