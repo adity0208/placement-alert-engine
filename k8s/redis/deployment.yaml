@@ -1,0 +1,65 @@
+# Redis — single replica (StatefulSet would be ideal for prod with persistence)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: placement-redis
+  namespace: placement
+  labels:
+    app: placement-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: placement-redis
+  template:
+    metadata:
+      labels:
+        app: placement-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          args: ["redis-server", "--appendonly", "yes"]
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          emptyDir: {}   # For kind/minikube local dev; replace with PVC in prod
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: placement-redis
+  namespace: placement
+  labels:
+    app: placement-redis
+spec:
+  selector:
+    app: placement-redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+  type: ClusterIP
+

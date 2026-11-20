@@ -1,0 +1,84 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# API Deployment — stateless Express/WebSocket server
+# Scaled by HPA (see hpa.yaml). Does NOT hold Telegram session.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: placement-api
+  namespace: placement
+  labels:
+    app: placement-api
+    component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: placement-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0       # Zero-downtime rolling deploy
+  template:
+    metadata:
+      labels:
+        app: placement-api
+        component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "5000"
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api
+          image: YOUR_DOCKERHUB_USERNAME/placement-backend:latest   # Replace before apply
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: placement-config
+            - secretRef:
+                name: placement-secrets
+          env:
+            # Override SESSION_STRING to empty — API pods must NOT start Telegram listener
+            # The worker pod handles Telegram via SESSION_STRING.
+            # In a future refactor, extract TelegramListener to the worker binary only.
+            - name: DISABLE_TELEGRAM
+              value: "true"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/ping
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: placement-api
+                topologyKey: kubernetes.io/hostname
+

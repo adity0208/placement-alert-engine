@@ -1,0 +1,70 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingress — nginx-ingress controller (works with kind & minikube)
+#
+# kind setup:  kind create cluster --config kind-config.yaml
+#              kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+#
+# minikube:    minikube addons enable ingress
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: placement-ingress
+  namespace: placement
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # WebSocket upgrade headers
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: placement.local           # For kind/minikube: add to /etc/hosts
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: placement-api
+                port:
+                  number: 5000
+          - path: /jobs
+            pathType: Prefix
+            backend:
+              service:
+                name: placement-api
+                port:
+                  number: 5000
+          - path: /hackathons
+            pathType: Prefix
+            backend:
+              service:
+                name: placement-api
+                port:
+                  number: 5000
+          - path: /stats
+            pathType: Prefix
+            backend:
+              service:
+                name: placement-api
+                port:
+                  number: 5000
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: placement-api
+                port:
+                  number: 5000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: placement-frontend
+                port:
+                  number: 80
+

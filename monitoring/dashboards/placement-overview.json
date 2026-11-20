@@ -1,0 +1,111 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Ingestion & Queue Metrics",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" } },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 1 },
+      "id": 2,
+      "title": "Notices Ingested (Total & Rate)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(notices_ingested_total[5m])) by (type)",
+          "legendFormat": "{{type}} ingestion rate/sec"
+        },
+        {
+          "expr": "sum(notices_ingested_total) by (type)",
+          "legendFormat": "Total {{type}} count"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" } },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 1 },
+      "id": 3,
+      "title": "BullMQ Ingestion Queue Depth",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "queue_depth",
+          "legendFormat": "Waiting + Delayed Jobs"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops" } },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 1 },
+      "id": 4,
+      "title": "Gemini Failovers / Retries",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(gemini_retries_total[5m])",
+          "legendFormat": "Gemini Failover Rate"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 8 },
+      "id": 5,
+      "title": "AI Parsing Engine Latency & Failures",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "id": 6,
+      "title": "AI Parse Duration (p50 / p95 by Tier)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(parse_duration_seconds_bucket[5m])) by (le, tier))",
+          "legendFormat": "{{tier}} p95 latency"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(parse_duration_seconds_bucket[5m])) by (le, tier))",
+          "legendFormat": "{{tier}} p50 latency"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "id": 7,
+      "title": "Parser Failures by Tier",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(parse_failures_total[5m])) by (tier)",
+          "legendFormat": "{{tier}} failures/sec"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["placement-engine", "devops", "prometheus"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "Placement Alert Engine — SRE Overview",
+  "version": 1
+}
+

@@ -7,6 +7,10 @@ import { initWebSocket, getClientCount } from './websocket.js';
 import { startTelegramListener, stopTelegramListener } from './telegramListener.js';
 import { logger } from './utils/logger.js';
 import Job from './models/Job.js';
+import { startWorker, stopWorker } from './worker.js';
+import { getMessageQueue, closeQueue } from './lib/queue.js';
+import { closeRedis } from './lib/redis.js';
+import { registry, queueDepth } from './lib/metrics.js';
 
 // Load environment variables
 dotenv.config();
@@ -41,7 +45,6 @@ app.use((req, res, next) => {
     next();
 });
 
-
 // Rate limiting for /jobs endpoint (10 requests per minute per IP)
 const jobsLimiter = rateLimit({
     windowMs: 60 * 1000, // 1 minute
@@ -51,7 +54,7 @@ const jobsLimiter = rateLimit({
     legacyHeaders: false,
 });
 
-// Health check endpoint (for Render keep-alive)
+// Health check endpoint
 app.get('/', (req, res) => {
     res.json({
         status: 'online',
@@ -61,9 +64,19 @@ app.get('/', (req, res) => {
     });
 });
 
-// Lightweight ping endpoint specifically designed for frontend wake-ups
+// Lightweight ping endpoint specifically designed for frontend wake-ups and readiness probes
 app.get('/api/ping', (req, res) => {
     res.status(200).send('pong');
+});
+
+// Prometheus metrics endpoint
+app.get('/metrics', async (req, res) => {
+    try {
+        res.set('Content-Type', registry.contentType);
+        res.end(await registry.metrics());
+    } catch (err) {
+        res.status(500).end(err.message);
+    }
 });
 
 // Get all active jobs (with rate limiting)
@@ -148,9 +161,33 @@ const server = http.createServer(app);
 // Initialize WebSocket
 initWebSocket(server);
 
+// Periodically update queue depth gauge
+setInterval(async () => {
+    try {
+        const queue = getMessageQueue();
+        if (queue) {
+            const counts = await queue.getJobCounts('waiting', 'delayed');
+            queueDepth.set((counts.waiting || 0) + (counts.delayed || 0));
+        }
+    } catch {
+        // Queue or Redis might be reconnecting/unavailable
+    }
+}, 15000);
+
 // Validate environment variables
 function validateEnvironment() {
-    const required = ['API_ID', 'API_HASH', 'SESSION_STRING', 'TELEGRAM_TARGETS', 'MONGODB_URI'];
+    if (!process.env.MONGODB_URI) {
+        logger.error('Missing required environment variable: MONGODB_URI');
+        process.exit(1);
+    }
+
+    // In K8s API deployment, Telegram listener is disabled
+    if (process.env.DISABLE_TELEGRAM === 'true') {
+        logger.info('DISABLE_TELEGRAM=true: Telegram credential validation skipped');
+        return;
+    }
+
+    const required = ['API_ID', 'API_HASH', 'SESSION_STRING', 'TELEGRAM_TARGETS'];
     const missing = required.filter(key => !process.env[key]);
 
     if (missing.length > 0) {
@@ -172,10 +209,10 @@ function validateEnvironment() {
 async function connectDB() {
     try {
         await mongoose.connect(process.env.MONGODB_URI, {
-            maxPoolSize: 10, // Maintain up to 10 socket connections
-            minPoolSize: 2, // Keep at least 2 connections active
-            serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
-            socketTimeoutMS: 45000 // Close sockets after 45 seconds of inactivity
+            maxPoolSize: 10,
+            minPoolSize: 2,
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000
         });
         logger.success('Connected to MongoDB (Pool Size: 10)');
     } catch (error) {
@@ -193,17 +230,25 @@ async function startServer() {
         // Connect to database
         await connectDB();
 
-        // Start Telegram listener (don't await - let it retry in background)
-        startTelegramListener().catch(error => {
-            logger.error('Telegram listener failed to start:', error.message);
-            logger.info('Telegram will retry connection in background...');
-        });
+        // Start Telegram listener if not disabled
+        if (process.env.DISABLE_TELEGRAM !== 'true') {
+            startTelegramListener().catch(error => {
+                logger.error('Telegram listener failed to start:', error.message);
+                logger.info('Telegram will retry connection in background...');
+            });
+        }
+
+        // Start BullMQ worker for async message parsing (unless worker is separate process)
+        if (process.env.DISABLE_WORKER !== 'true') {
+            startWorker();
+        }
 
         // Start HTTP server
         server.listen(PORT, () => {
             logger.success(`Server running on port ${PORT}`);
             logger.info(`Health check: http://localhost:${PORT}/`);
             logger.info(`Jobs endpoint: http://localhost:${PORT}/jobs`);
+            logger.info(`Metrics endpoint: http://localhost:${PORT}/metrics`);
         });
     } catch (error) {
         logger.error('Failed to start server:', error.message);
@@ -216,8 +261,11 @@ async function gracefulShutdown(signal) {
     logger.info(`${signal} received, shutting down gracefully...`);
 
     try {
-        await stopTelegramListener();
-        await mongoose.connection.close();
+        await stopTelegramListener().catch(() => {});
+        await stopWorker().catch(() => {});
+        await closeQueue().catch(() => {});
+        await closeRedis().catch(() => {});
+        await mongoose.connection.close().catch(() => {});
 
         server.close(() => {
             logger.success('Server closed');

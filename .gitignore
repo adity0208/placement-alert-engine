@@ -208,3 +208,8 @@ docker-compose.override.yml
 
 # Coverage reports (from tests)
 backend/coverage/
+
+evidence/
+.impeccable/
+.github/skills/
+.github/hooks/

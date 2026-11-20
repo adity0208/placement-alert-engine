@@ -58,9 +58,18 @@ export default function JobsPage({ jobs }) {
                     <h3>{searchQuery ? 'No matching jobs' : 'No Active Jobs'}</h3>
                     <p>
                         {searchQuery
-                            ? `No results for "${searchQuery}"`
+                            ? `No opportunities found matching "${searchQuery}".`
                             : 'New placement opportunities will appear here automatically'}
                     </p>
+                    {searchQuery && (
+                        <button
+                            onClick={() => setSearchQuery('')}
+                            className="btn btn-secondary"
+                            style={{ maxWidth: '160px', marginTop: '0.75rem' }}
+                        >
+                            Reset Search
+                        </button>
+                    )}
                 </div>
             ) : (
                 <div className="jobs-grid">

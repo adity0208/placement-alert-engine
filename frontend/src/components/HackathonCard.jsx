@@ -139,12 +139,13 @@ export default function HackathonCard({ hackathon }) {
                         target="_blank"
                         rel="noopener noreferrer"
                         className="btn btn-primary"
+                        aria-label={`Register for ${title}`}
                     >
                         <ExternalLink className="w-4 h-4 shrink-0 mr-1.5" />
                         Register Now
                     </a>
                 ) : (
-                    <button className="btn disabled" disabled>
+                    <button className="btn disabled" disabled aria-disabled="true">
                         <AlertCircle className="w-4 h-4 shrink-0 mr-1.5" />
                         Registration Link Not Found
                     </button>
@@ -152,18 +153,21 @@ export default function HackathonCard({ hackathon }) {
                 <button
                     onClick={handleCopy}
                     className="btn btn-secondary"
+                    aria-label={copied ? "Copied contest details to clipboard" : `Copy ${title} details`}
                 >
-                    {copied ? (
-                        <>
-                            <Check className="w-4 h-4 shrink-0 mr-1.5 text-emerald-500" />
-                            Copied
-                        </>
-                    ) : (
-                        <>
-                            <Copy className="w-4 h-4 shrink-0 mr-1.5" />
-                            Copy Info
-                        </>
-                    )}
+                    <span aria-live="polite" className="inline-flex items-center">
+                        {copied ? (
+                            <>
+                                <Check className="w-4 h-4 shrink-0 mr-1.5 text-emerald-500" />
+                                Copied
+                            </>
+                        ) : (
+                            <>
+                                <Copy className="w-4 h-4 shrink-0 mr-1.5" />
+                                Copy Info
+                            </>
+                        )}
+                    </span>
                 </button>
             </div>
         </div>
