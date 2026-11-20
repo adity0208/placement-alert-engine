@@ -3,8 +3,8 @@ import { StringSession } from 'telegram/sessions/index.js';
 import { NewMessage } from 'telegram/events/NewMessage.js';
 import { logger } from './utils/logger.js';
 import Job from './models/Job.js';
-import { broadcast } from './websocket.js';
 import { parseJobMessage } from './aiParser.js';
+import { enqueueMessage } from './lib/queue.js';
 
 let client = null;
 let isConnected = false;
@@ -373,77 +373,15 @@ async function handleNewMessage(event) {
             return;
         }
 
-        // Call Gemini AI parser to classify and parse
-        logger.info(`[Real-time] Classifying message ${messageId} via Gemini AI...`);
-        const parsed = await parseJobMessage(messageText);
-
-        if (parsed.type === 'other') {
-            logger.info(`[Real-time] Message classified as "other". Discarding.`);
-            return;
-        }
-
-        // Check for duplicate job/hackathon links across channels
-        if (parsed.applyLink) {
-            const existingLink = await Job.findOne({
-                applyLink: parsed.applyLink,
-                type: parsed.type
-            });
-            if (existingLink) {
-                logger.warn(`[Real-time] Duplicate ${parsed.type} link detected: ${parsed.applyLink}. Skipping.`);
-                return;
-            }
-        }
-
-        const jobData = {
-            type: parsed.type, // 'job' or 'hackathon'
-            title: parsed.type === 'job' 
-                ? `${parsed.companyName} is hiring for ${parsed.jobRole || 'Role'}`
-                : parsed.title,
-            message: messageText,
-            link: parsed.applyLink,
-            companyName: parsed.companyName,
-            jobRole: parsed.jobRole,
-            deadline: parsed.deadline,
-            applyLink: parsed.applyLink,
-            eligibility: parsed.eligibility,
-            experience: parsed.experience,
-            targetBatch: parsed.targetBatch,
-            organizer: parsed.organizer,
-            prizePool: parsed.prizePool,
-            sourceName: matched.sourceName,
+        // Enqueue message for async AI parsing via BullMQ
+        logger.info(`[Real-time] Enqueueing message ${messageId} for parsing...`);
+        await enqueueMessage({
+            messageText,
+            messageId,
             groupId: matched.id,
-            telegramMessageId: messageId,
-            isAIParsed: true
-        };
-
-        const newDoc = new Job(jobData);
-        await newDoc.save();
-
-        logger.success(`[Real-time] Saved parsed ${parsed.type} to DB (ID: ${newDoc._id})`);
-
-        // Broadcast to WebSocket clients
-        broadcast({
-            _id: newDoc._id,
-            type: newDoc.type,
-            title: newDoc.title,
-            message: newDoc.message,
-            link: newDoc.link,
-            createdAt: newDoc.createdAt,
-            expiresAt: newDoc.expiresAt,
-            timeRemaining: newDoc.timeRemaining,
-            companyName: newDoc.companyName,
-            jobRole: newDoc.jobRole,
-            deadline: newDoc.deadline,
-            applyLink: newDoc.applyLink,
-            eligibility: newDoc.eligibility,
-            experience: newDoc.experience,
-            targetBatch: newDoc.targetBatch,
-            organizer: newDoc.organizer,
-            prizePool: newDoc.prizePool,
-            sourceName: newDoc.sourceName,
-            groupId: newDoc.groupId,
-            isAIParsed: newDoc.isAIParsed
-        }, parsed.type);
+            sourceName: matched.sourceName,
+        });
+        logger.info(`[Real-time] Message ${messageId} enqueued successfully`);
 
     } catch (error) {
         logger.error('Error handling real-time message:', error.message);

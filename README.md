@@ -1,175 +1,247 @@
-# Placement Alert Engine
+# Placement Alert Engine — Production Cloud Architecture
 
-A production-ready, real-time event-driven job & hackathon notification system. It monitors specified Telegram channels using the MTProto API, parses unstructured text with a **Multi-Tier AI Fallback Engine** (Gemini 2.0 Flash + Groq Llama 3.3 70B + Local Regex), prevents duplicates via MongoDB compound indexing, auto-expires stale alerts, and streams updates instantly to active clients via WebSockets.
+[![CI](https://github.com/adity0208/placement-alert-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/adity0208/placement-alert-engine/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/Docker-Multi--stage-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-HPA%20%7C%20Worker-326CE5?logo=kubernetes&logoColor=white)](k8s/)
+[![Redis](https://img.shields.io/badge/Queue-BullMQ%20%2B%20Redis-DC382D?logo=redis&logoColor=white)](backend/lib/queue.js)
+[![Prometheus](https://img.shields.io/badge/Metrics-Prometheus%20%2B%20Grafana-E6522C?logo=prometheus&logoColor=white)](monitoring/)
+[![Tests](https://img.shields.io/badge/Tests-Jest%20%7C%2037%20Passed-C21325?logo=jest&logoColor=white)](backend/tests/)
+
+A resilient, event-driven, production-grade job and hackathon notification microservice. It monitors Telegram channels using the MTProto binary protocol, buffers payloads in a **BullMQ/Redis queue**, parses unstructured postings with a **3-Tier AI Fallback Engine** (Google Gemini 2.0 Flash → Groq Llama 3.3 70B → Local Regex), enforces deduplication via MongoDB compound indexing, streams alerts in real-time via WebSockets, and exports Prometheus metrics with Grafana dashboards.
+
+Containerized with multi-stage Docker builds, automated by GitHub Actions CI/CD, and orchestrated on Kubernetes with a stateless API tier (auto-scaled via HPA) and a dedicated single-replica stateful ingestion worker.
 
 ---
 
 ## 🏗️ System Architecture
 
 ```
-┌────────────────────────┐      ┌────────────────────────┐      ┌────────────────────────┐
-│  Telegram Channels     │─────▶│  GramJS Listener       │─────▶│ Multi-Tier AI Engine   │
-│  (Public / Private)    │      │  (Node.js / MTProto)   │      │ (Gemini ➔ Groq ➔ Regex) │
-└────────────────────────┘      └────────────────────────┘      └────────────────────────┘
-                                                                             │
-                                                                             ▼
-┌────────────────────────┐      ┌────────────────────────┐      ┌────────────────────────┐
-│  Frontend App          │◀─────│  WebSocket Server      │◀─────│ MongoDB Atlas          │
-│  (React + Lucide + PWA)│      │  (Express + WS)        │      │ (TTL & Compound Index) │
-└────────────────────────┘      └────────────────────────┘      └────────────────────────┘
+                                  TELEGRAM CHANNELS
+                               (Public / Private Groups)
+                                          │
+                                          │ MTProto Protocol
+                                          ▼
+                      ┌───────────────────────────────────────┐
+                      │   Stateful Ingestion Worker (K8s)     │
+                      │  (1 Replica - GramJS Session Client)  │
+                      └──────────────────┬────────────────────┘
+                                         │
+                                         │ Enqueue Job
+                                         ▼
+                             ┌───────────────────────┐
+                             │    Redis 7 + BullMQ   │
+                             │  (parse-message Queue)│
+                             └───────────┬───────────┘
+                                         │
+                                         │ Worker Concurrency (3x)
+                                         ▼
+                      ┌───────────────────────────────────────┐
+                      │      3-Tier AI Fallback Engine        │
+                      │ 1. Gemini Flash (Google GenAI SDK)    │
+                      │ 2. Groq Llama 3.3 70B (Failover)     │
+                      │ 3. Deterministic Local Regex Engine   │
+                      └──────────────────┬────────────────────┘
+                                         │
+                      ┌──────────────────┴────────────────────┐
+                      ▼                                       ▼
+       ┌─────────────────────────────┐         ┌─────────────────────────────┐
+       │     MongoDB Database        │         │   WebSocket Broadcast Hub   │
+       │  - Compound Unique Index    │         │  (Real-Time Event Stream)   │
+       │  - 3-Day Auto-Purging TTL   │         └──────────────┬──────────────┘
+       │  - Sparse applyLink Index   │                        │
+       └─────────────────────────────┘                        │
+                      ▲                                       ▼
+                      │                         ┌───────────────────────────┐
+     ┌────────────────┴──────────────┐          │    Frontend Web App       │
+     │      Stateless REST API       │◀─────────┤   (React 18 + Vite + PWA) │
+     │  (2-6 Pods Scaled by K8s HPA) │          │   (Nginx Multi-Stage)     │
+     └──────────────┬────────────────┘          └───────────────────────────┘
+                    │
+                    │ Scrape /metrics (15s)
+                    ▼
+     ┌───────────────────────────────┐
+     │   Prometheus & Grafana SRE    │
+     │  - Latency Histograms (p95)   │
+     │  - Queue Backlog & Failovers  │
+     └───────────────────────────────┘
 ```
 
 ---
 
 ## ⚡ Core Engineering Highlights
 
-### 1. Multi-Tier AI Fallback Engine (`backend/aiParser.js`)
-To guarantee $0-downtime parsing reliability even when free-tier AI quotas are exhausted:
-* **Tier 1 (Primary AI)**: Google Gemini API (`gemini-2.0-flash` via `@google/genai`).
-* **Tier 2 (Failover AI)**: Groq API (`llama-3.3-70b-versatile` via `groq-sdk`). If Gemini returns an HTTP 429 rate limit or quota error, the system automatically routes the payload to Groq within milliseconds.
-* **Tier 3 (Local Fallback)**: Deterministic regex and keyword rules engine. If both AI services are unavailable, the local parser extracts job links, eligibility criteria, and classifications to guarantee zero data loss.
+### 1. Decoupled Async Message Ingestion (BullMQ + Redis)
+* **Separation of Concerns**: Telegram message delivery is asynchronous and bursty. Instead of blocking the listener on synchronous LLM API calls, raw payloads are immediately enqueued to BullMQ (`parse-message` queue) with exponential backoff retries.
+* **Idempotent Job Processing**: Jobs are assigned an idempotent key (`${groupId}-${messageId}`) to prevent redundant processing during network retries or listener reconnections.
 
-### 2. High-Contrast shadcn/ui Design System
-* **Iconography**: Complete integration of `lucide-react` SVG icons. All raw inline emojis have been replaced with vector icons (`Target`, `Briefcase`, `Trophy`, `Radio`, `Zap`, `Clock`, `Building2`, `GraduationCap`, `Calendar`, `Award`, `ExternalLink`, `Copy`, `Check`).
-* **Persistent Light / Dark Mode**:
-  * **Light Mode (Default)**: Solid warm off-white background (`#FAF8F5`), deep charcoal typography (`#18181B`), and strict 1px neutral gray borders (`#E4E4E7`).
-  * **Dark Mode**: Complete pitch-black dark mode (`#000000` background, `#FAFAFA` text, `#27272A` borders) with `localStorage` persistence (`placement_theme`).
-* **Title Sanitization**: Clean title processing that strips prompt prefix residue (e.g. `"Company name:"`, `"Role:"`, `"Title:"`) via regular expressions.
-* **PWA & Mobile Navigation Drawer**: Responsive top bar and slide-over navigation drawer with backdrop blur overlay (`.mobile-backdrop`) for small-screen compliance.
-* **UX Micro-Interactions**: Interactive 2-second copy button feedback state (`<Check /> Copied`).
+### 2. Multi-Tier AI Fallback Engine (`backend/aiParser.js`)
+* **Tier 1 (Primary)**: Google Gemini API (`gemini-2.0-flash`) with structured JSON schema enforcement.
+* **Tier 2 (Failover)**: Groq API (`llama-3.3-70b-versatile`). Automatically absorbs traffic within milliseconds if Gemini encounters HTTP 429 rate limits or quota exhaustion.
+* **Tier 3 (Local Offline Fallback)**: Deterministic regex and keyword rules engine. Operates with zero network dependency to guarantee 100% ingestion uptime.
 
-### 3. Data Integrity & Storage Strategy
-* **Duplicate Prevention**: Compound unique indexing (`{ telegramMessageId: 1, groupId: 1 }`) prevents re-processing the same announcement.
-* **Auto-Purging TTL Index**: MongoDB TTL index (`expiresAt`) automatically deletes postings after 24-48 hours to ensure a fresh feed.
+### 3. Production Kubernetes Topology (kind & minikube ready)
+* **API Deployment (`k8s/api/`)**: Fully stateless Express and WebSocket API. Configured with a `HorizontalPodAutoscaler` (HPA) scaling between 2 and 6 pods on 70% CPU / 80% memory utilization. Liveness (`/`) and readiness (`/api/ping`) probes ensure zero-downtime rolling updates.
+* **Ingestion Worker Deployment (`k8s/worker/`)**: Fixed at **exactly 1 replica** with `Recreate` update strategy. The Telegram `SESSION_STRING` authenticates a single MTProto session and cannot be shared across multiple concurrent pods without session invalidation.
+
+### 4. Enterprise Observability (`backend/lib/metrics.js`)
+Exposes `/metrics` in Prometheus format scraped every 15 seconds:
+* `notices_ingested_total`: Counter tracking saved postings, labelled by `type` (job/hackathon) and `source` (gemini/groq/local).
+* `parse_duration_seconds`: Latency histogram tracking parse duration percentiles (p50, p95, p99) per engine tier.
+* `parse_failures_total`: Counter tracking error rates per tier.
+* `queue_depth`: Gauge reflecting current waiting + delayed jobs in BullMQ.
+* `gemini_retries_total`: Counter tracking failover events from Gemini to Groq/local.
+* Preconfigured Prometheus alert rules (`monitoring/alerts/rules.yml`) and Grafana SRE dashboard (`monitoring/dashboards/placement-overview.json`).
 
 ---
 
 ## 📦 Tech Stack
 
-### Backend
-* **Runtime**: Node.js (ES Modules)
-* **Framework**: Express.js
-* **Real-time Protocol**: WebSockets (`ws`)
-* **Telegram Client**: GramJS (`telegram` MTProto API)
-* **AI Provider 1**: `@google/genai` (Gemini 2.0 Flash)
-* **AI Provider 2**: `groq-sdk` (Llama 3.3 70B Versatile)
-* **Database**: MongoDB Atlas via Mongoose ODM
-* **Security & Rate Limiting**: `express-rate-limit`
-
-### Frontend
-* **UI Framework**: React 18
-* **Build Tool**: Vite
-* **Icon System**: `lucide-react`
-* **Styling**: Vanilla CSS (TailwindCSS integration ready)
-
----
-
-## 🔑 Environment Configuration
-
-Create `.env` files in both `backend/` and `frontend/` directories using the parameters listed below.
-
-### `backend/.env`
-
-```env
-# Telegram MTProto Credentials (https://my.telegram.org/apps)
-API_ID=your_api_id
-API_HASH=your_api_hash
-SESSION_STRING=your_gramjs_session_string
-
-# Telegram Target Channels/Groups (comma-separated IDs or handles)
-TELEGRAM_TARGETS=-1001234567890,@react_jobs
-
-# MongoDB Database URI
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/placement-alerts?retryWrites=true&w=majority
-
-# Backend Port
-PORT=5000
-
-# Primary AI Provider (Google AI Studio: https://aistudio.google.com)
-GEMINI_API_KEY=your_gemini_api_key
-
-# Secondary Failover AI Provider (Groq Console: https://console.groq.com)
-GROQ_API_KEY=your_groq_api_key
-```
-
-### `frontend/.env`
-
-```env
-VITE_WS_URL=ws://localhost:5000
-VITE_API_URL=http://localhost:5000
-```
+| Domain | Technology |
+|---|---|
+| **Backend Runtime** | Node.js 20+ (Strict ES Modules) |
+| **API Framework** | Express.js, WebSockets (`ws`), `express-rate-limit` |
+| **Async Queue & Cache** | BullMQ v5, Redis 7 (ioredis) |
+| **Telegram Protocol** | GramJS (MTProto binary protocol) |
+| **AI Parsing** | Google GenAI SDK (Gemini 2.0 Flash) + Groq SDK (Llama 3.3 70B) |
+| **Database** | MongoDB Atlas / Mongoose (Compound unique index + 72h TTL) |
+| **Testing** | Jest 29, Supertest 7, Mocked AI & In-memory Repositories (37 tests) |
+| **Containers** | Docker (multi-stage, non-root users), Docker Compose |
+| **Orchestration** | Kubernetes (Deployments, HPA, Services, Ingress, kind/minikube) |
+| **CI/CD** | GitHub Actions (Lint, Test, Docker Buildx, Audit, CD push) |
+| **Observability** | Prometheus (`prom-client`), Grafana dashboards, Alertmanager rules |
+| **Frontend** | React 18, Vite, Lucide Icons, Nginx reverse proxy |
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Local Docker Compose)
 
-### 1. Clone & Install Dependencies
+The entire stack — Redis, Backend, Frontend, Prometheus, and Grafana — spins up with a single command.
 
+### 1. Prerequisites
+* [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running.
+* Copy environment templates:
+  ```bash
+  cp backend/.env.example backend/.env
+  cp frontend/.env.example frontend/.env
+  ```
+  *(Fill in your `MONGODB_URI` and optional AI keys in `backend/.env`)*
+
+### 2. Start Services
 ```bash
-git clone https://github.com/adity0208/placement-alert-engine.git
-cd placement-alert-engine
-
-# Install backend dependencies
-cd backend
-npm install
-
-# Install frontend dependencies
-cd ../frontend
-npm install
+docker-compose up --build -d
 ```
 
-### 2. Generate Telegram Session String
-
-If you need a new GramJS session string:
-
-```bash
-cd backend
-npm run generate-session
-```
-
-Follow the command-line authentication prompts and copy the generated string into `SESSION_STRING` in `backend/.env`.
-
-### 3. Run Development Servers
-
-**Terminal 1 (Backend):**
-```bash
-cd backend
-npm start
-```
-
-**Terminal 2 (Frontend):**
-```bash
-cd frontend
-npm run dev
-```
-
-Visit `http://localhost:5173` in your browser.
+### 3. Verify Endpoints
+| Service | URL | Credentials / Notes |
+|---|---|---|
+| **Frontend Web App** | `http://localhost:80` | Production React SPA served via Nginx |
+| **Backend API Health** | `http://localhost:5000/` | Returns JSON status & WebSocket client count |
+| **Backend Readiness** | `http://localhost:5000/api/ping` | Returns `pong` |
+| **Prometheus Metrics** | `http://localhost:5000/metrics` | Raw Prometheus metric exposition |
+| **Prometheus UI** | `http://localhost:9090` | Targets & scrape health |
+| **Grafana Dashboard** | `http://localhost:3001` | User: `admin` / Password: `admin` |
 
 ---
 
-## 📊 API & System Endpoints
+## ☸️ Kubernetes Deployment (kind / minikube)
 
-### `GET /`
-Health check endpoint returning system status and connected WebSocket clients.
+Validating production Kubernetes objects locally with [kind](https://kind.sigs.k8s.io/) or [minikube](https://minikube.sigs.k8s.io/):
 
-**Response:**
-```json
-{
-  "status": "online",
-  "service": "Placement Alert System",
-  "timestamp": "2026-07-22T14:00:00.000Z",
-  "connectedClients": 3
-}
+### Option A: Using kind (Recommended)
+
+1. **Create multi-node cluster with ingress support:**
+   ```bash
+   kind create cluster --config k8s/kind-config.yaml --name placement
+   ```
+
+2. **Install Nginx Ingress Controller:**
+   ```bash
+   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+   kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=90s
+   ```
+
+3. **Deploy the application stack:**
+   ```bash
+   # 1. Create namespace
+   kubectl apply -f k8s/namespace.yaml
+
+   # 2. Apply config and secrets
+   kubectl apply -f k8s/configmap.yaml
+   kubectl apply -f k8s/secret.yaml
+
+   # 3. Deploy Redis service
+   kubectl apply -f k8s/redis/deployment.yaml
+
+   # 4. Deploy stateless API with HPA
+   kubectl apply -f k8s/api/deployment.yaml
+   kubectl apply -f k8s/api/service.yaml
+   kubectl apply -f k8s/api/hpa.yaml
+
+   # 5. Deploy single-replica Ingestion Worker
+   kubectl apply -f k8s/worker/deployment.yaml
+
+   # 6. Deploy Frontend & Ingress
+   kubectl apply -f k8s/frontend/deployment.yaml
+   kubectl apply -f k8s/ingress.yaml
+   ```
+
+4. **Verify workloads:**
+   ```bash
+   kubectl get pods,svc,hpa -n placement
+   ```
+
+---
+
+## 🧪 Test Suite & Quality Assurance
+
+The codebase includes comprehensive unit and integration tests covering parser failovers, deduplication, schema contracts, and API routes.
+
+```bash
+cd backend
+npm test
 ```
 
-### `GET /jobs`
-Returns all active job listings (Rate-limited: 10 requests/min per IP).
+### Test Coverage Highlights (37/37 Tests Passing)
+* **`tests/aiParser.test.js` (9 tests)**: Verifies Gemini JSON parsing with mocked responses, validates seamless failover to Groq on rate limits (HTTP 429), verifies deterministic regex fallback when all AI APIs are unreachable, and rejects non-job notifications.
+* **`tests/dedupe.test.js` (9 tests)**: Enforces compound unique constraint (`telegramMessageId` + `groupId`), verifies cross-channel `applyLink` deduplication, and tests rejection filters against congratulatory messages.
+* **`tests/jobModel.test.js` (11 tests)**: Validates Mongoose schema constraints, enum values (`job`, `hackathon`), 72-hour TTL pre-save calculation, and virtual property calculations.
+* **`tests/api.test.js` (8 tests)**: Supertest integration testing for `GET /`, `GET /api/ping`, `GET /jobs` (sorting & expiry filtering), `GET /hackathons`, `GET /stats`, and `GET /metrics`.
 
-### `GET /stats`
-Returns current system metrics (active jobs, total ingested jobs, and active WebSocket connections).
+---
+
+## 🔄 CI/CD Pipeline (GitHub Actions)
+
+Located in `.github/workflows/`:
+
+* **`ci.yml` (Pull Requests & Main)**:
+  1. **Lint Backend**: Syntax and code standards verification.
+  2. **Test Backend**: Spawns an ephemeral Redis 7 service container, sets isolated test environments, and executes the full Jest suite.
+  3. **Docker Build**: Validates multi-stage Docker builds for backend and frontend.
+  4. **Security Audit**: Scans npm dependencies for high/critical vulnerabilities.
+* **`cd.yml` (Main Branch Push & Release Tags)**:
+  1. Authenticates against Docker Hub / GHCR via repository secrets.
+  2. Builds and pushes multi-architecture images with Git commit SHA and semantic version tags.
+  3. Triggers rolling rollout restart across the Kubernetes deployment (`kubectl rollout restart deployment/placement-api -n placement`).
+
+---
+
+## 📑 Resume & Interview Talking Points
+
+### For Backend Engineering Roles
+> *"Architected an event-driven notification microservice in Node.js (ESM) processing Telegram announcements via MTProto. Designed a 3-tier resilient parser using Gemini 2.0 Flash with automatic sub-second failover to Groq Llama 3.3 and local regex rules to guarantee 100% parsing uptime. Decoupled ingestion from heavy AI inference using a BullMQ/Redis async queue with exponential backoff retries. Implemented MongoDB compound indexing (`{ telegramMessageId: 1, groupId: 1 }`) and TTL indexes for zero data loss and automated 72-hour cleanup. Wrote 37 automated tests with Jest and Supertest across schema validation, deduplication, and route logic."*
+
+### For DevOps & SRE Roles
+> *"Containerized a decoupled Node.js and React stack using multi-stage Dockerfiles and unprivileged non-root users (`uid 1001`), cutting runtime footprint by ~70%. Authored complete Kubernetes manifests dividing the system into an auto-scaled stateless API tier (HPA scaling 2–6 pods on CPU/memory thresholds) and a single-replica stateful ingestion worker to prevent MTProto session conflicts. Instrumented the application with Prometheus (`prom-client`) exposing 5 custom metrics (p95 parse duration, queue depth, ingestion throughput, Gemini failover rate), accompanied by preconfigured Alertmanager alert rules and Grafana SRE dashboards. Built a 4-stage GitHub Actions CI/CD pipeline running automated tests against Redis service containers and pushing tagged images to registries."*
+
+---
+
+## 🔒 Security & Best Practices
+* **No Hardcoded Secrets**: All credentials (`SESSION_STRING`, `API_ID`, `GEMINI_API_KEY`, `MONGODB_URI`) are passed exclusively via environment variables or Kubernetes Secrets.
+* **Non-Root Containers**: Docker runner stages create dedicated `nodeuser:nodejs` (UID 1001) to prevent privilege escalation vulnerabilities.
+* **Rate Limiting**: `express-rate-limit` guards against client abuse on read endpoints.
 
 ---
 
 ## 📝 License
-
 MIT

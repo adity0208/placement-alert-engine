@@ -248,12 +248,13 @@ export default function JobCard({ job }) {
                         target="_blank"
                         rel="noopener noreferrer"
                         className="btn btn-primary"
+                        aria-label={`Apply to ${companyName} for ${jobRole}`}
                     >
                         <ExternalLink className="w-4 h-4 shrink-0 mr-1.5" />
                         Apply Now
                     </a>
                 ) : (
-                    <button className="btn disabled" disabled>
+                    <button className="btn disabled" disabled aria-disabled="true">
                         <AlertCircle className="w-4 h-4 shrink-0 mr-1.5" />
                         Link Not Found
                     </button>
@@ -261,18 +262,21 @@ export default function JobCard({ job }) {
                 <button
                     onClick={handleCopy}
                     className="btn btn-secondary"
+                    aria-label={copied ? "Copied notice details to clipboard" : `Copy ${companyName} posting details`}
                 >
-                    {copied ? (
-                        <>
-                            <Check className="w-4 h-4 shrink-0 mr-1.5 text-emerald-500" />
-                            Copied
-                        </>
-                    ) : (
-                        <>
-                            <Copy className="w-4 h-4 shrink-0 mr-1.5" />
-                            Copy
-                        </>
-                    )}
+                    <span aria-live="polite" className="inline-flex items-center">
+                        {copied ? (
+                            <>
+                                <Check className="w-4 h-4 shrink-0 mr-1.5 text-emerald-500" />
+                                Copied
+                            </>
+                        ) : (
+                            <>
+                                <Copy className="w-4 h-4 shrink-0 mr-1.5" />
+                                Copy
+                            </>
+                        )}
+                    </span>
                 </button>
             </div>
         </div>

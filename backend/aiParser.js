@@ -1,6 +1,11 @@
 import { GoogleGenAI } from '@google/genai';
 import Groq from 'groq-sdk';
 import dotenv from 'dotenv';
+import {
+  parseDurationSeconds,
+  parseFailuresTotal,
+  geminiRetriesTotal,
+} from './lib/metrics.js';
 
 dotenv.config();
 
@@ -45,7 +50,7 @@ if (!geminiClient && !groqClient) {
  */
 function localFallbackParse(text) {
   const textLower = text.toLowerCase();
-  
+
   // Rejection keywords filter (e.g. results, congrats)
   const REJECT_KEYWORDS = ['selected', 'shortlisted', 'congratulations', 'congrats', 'rejected', 'not selected'];
   const isRejected = REJECT_KEYWORDS.some(k => textLower.includes(k));
@@ -117,9 +122,32 @@ function localFallbackParse(text) {
 }
 
 /**
- * Parse using Gemini 2.0 Flash
+ * Wraps a promise with a timeout, rejecting if it exceeds the specified duration.
+ * @param {Promise} promise - The promise to wrap
+ * @param {number} ms - Timeout in milliseconds
+ * @param {string} label - Label for error message
+ * @returns {Promise}
  */
-async function parseWithGemini(rawTelegramText) {
+export function withTimeout(promise, ms = 10000, label = 'Operation') {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+  });
+
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    timeoutPromise
+  ]);
+}
+
+/**
+ * Parse using Gemini models
+ * @param {string} rawTelegramText
+ * @param {string} model
+ */
+async function parseWithGemini(rawTelegramText, model = 'gemini-3.8-flash') {
   const prompt = `
     You are an expert academic and placement cell operations assistant. 
     Analyze the following raw notification text and extract the details in JSON.
@@ -136,7 +164,7 @@ async function parseWithGemini(rawTelegramText) {
   `;
 
   const response = await geminiClient.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: model,
     contents: prompt,
     config: {
       responseMimeType: 'application/json',
@@ -166,7 +194,7 @@ async function parseWithGemini(rawTelegramText) {
 }
 
 /**
- * Parse using Groq API (llama-3.3-70b-versatile)
+ * Parse using Groq API
  */
 async function parseWithGroq(rawTelegramText) {
   const prompt = `
@@ -198,7 +226,7 @@ Raw Text:
 
   const completion = await groqClient.chat.completions.create({
     messages: [{ role: 'user', content: prompt }],
-    model: 'llama-3.3-70b-versatile',
+    model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
     response_format: { type: 'json_object' }
   });
 
@@ -239,31 +267,61 @@ export async function parseJobMessage(rawTelegramText, forceLocal = false) {
   }
 
   let cleanData = null;
+  const timeoutMs = process.env.PROVIDER_TIMEOUT_MS
+    ? parseInt(process.env.PROVIDER_TIMEOUT_MS, 10)
+    : 10000;
 
-  // Level 1: Try Gemini API
+  // Level 1: Try Gemini API models in order
   if (geminiClient) {
-    try {
-      cleanData = await parseWithGemini(rawTelegramText);
-      console.log("🚀 Successfully parsed message using Gemini API.");
-    } catch (geminiError) {
-      console.warn("⚠️ Gemini API failed/rate-limited:", geminiError.message);
+    const geminiModels = (process.env.GEMINI_MODELS || 'gemini-3.8-flash,gemini-3.7-flash')
+      .split(',')
+      .map(m => m.trim())
+      .filter(Boolean);
+
+    for (const model of geminiModels) {
+      const endGemini = parseDurationSeconds.startTimer({ tier: 'gemini' });
+      try {
+        cleanData = await withTimeout(
+          parseWithGemini(rawTelegramText, model),
+          timeoutMs,
+          `Gemini API (${model})`
+        );
+        endGemini();
+        console.log(`🚀 Successfully parsed message using Gemini API (${model}).`);
+        break;
+      } catch (geminiError) {
+        endGemini();
+        parseFailuresTotal.inc({ tier: 'gemini' });
+        geminiRetriesTotal.inc();
+        console.warn(`⚠️ Gemini API model ${model} failed/rate-limited:`, geminiError.message);
+      }
     }
   }
 
   // Level 2: Failover to Groq API if Gemini failed or is unconfigured
   if (!cleanData && groqClient) {
+    const endGroq = parseDurationSeconds.startTimer({ tier: 'groq' });
     try {
-      cleanData = await parseWithGroq(rawTelegramText);
+      cleanData = await withTimeout(
+        parseWithGroq(rawTelegramText),
+        timeoutMs,
+        'Groq API'
+      );
+      endGroq();
       console.log("⚡ Successfully parsed message using Groq API (Failover).");
     } catch (groqError) {
+      endGroq();
+      parseFailuresTotal.inc({ tier: 'groq' });
       console.warn("⚠️ Groq API failed:", groqError.message);
     }
   }
 
   // Level 3: Failover to Local Regex Parser if both AI providers failed
   if (!cleanData) {
+    const endLocal = parseDurationSeconds.startTimer({ tier: 'local' });
     console.warn("⚠️ All AI APIs failed. Using local regex fallback parser.");
     cleanData = localFallbackParse(rawTelegramText);
+    endLocal();
   }
 
   return {

@@ -1,0 +1,48 @@
+groups:
+  - name: placement-alert-engine-rules
+    rules:
+      - alert: BackendDown
+        expr: up{job="placement-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Placement backend instance is unreachable"
+          description: "Instance {{ $labels.instance }} has been down for more than 1 minute."
+
+      - alert: HighParseLatency
+        expr: histogram_quantile(0.95, sum(rate(parse_duration_seconds_bucket[5m])) by (le, tier)) > 4
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High AI parsing latency detected"
+          description: "95th percentile latency for tier {{ $labels.tier }} exceeded 4 seconds over the last 5 minutes."
+
+      - alert: HighParseFailures
+        expr: sum(rate(parse_failures_total[5m])) by (tier) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AI parsing failures spike"
+          description: "Tier {{ $labels.tier }} is failing at a rate of >0.1 failures/sec."
+
+      - alert: QueueDepthSpike
+        expr: queue_depth > 50
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BullMQ ingestion queue backlog detected"
+          description: "BullMQ queue has {{ $value }} pending jobs for over 3 minutes."
+
+      - alert: GeminiRateLimited
+        expr: rate(gemini_retries_total[5m]) > 0.05
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gemini quota or rate limits reached"
+          description: "Gemini failover rate is {{ $value }}/sec; traffic is falling over to Groq and local regex."
+

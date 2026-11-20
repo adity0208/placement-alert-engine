@@ -57,9 +57,18 @@ export default function HackathonsPage({ hackathons }) {
                     <h3>{searchQuery ? 'No matching hackathons' : 'No Active Hackathons'}</h3>
                     <p>
                         {searchQuery
-                            ? `No results for "${searchQuery}"`
+                            ? `No contests found matching "${searchQuery}".`
                             : 'New contests and challenges will appear here automatically'}
                     </p>
+                    {searchQuery && (
+                        <button
+                            onClick={() => setSearchQuery('')}
+                            className="btn btn-secondary"
+                            style={{ maxWidth: '160px', marginTop: '0.75rem' }}
+                        >
+                            Reset Search
+                        </button>
+                    )}
                 </div>
             ) : (
                 <div className="jobs-grid">

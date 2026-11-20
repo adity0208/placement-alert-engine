@@ -1,0 +1,63 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingestion Worker Deployment — single replica, holds the Telegram session.
+#
+# Why single replica?
+#   The Telegram SESSION_STRING authenticates a single user session.
+#   Running two pods with the same session causes MTProto conflicts and
+#   disconnects. Therefore this deployment is intentionally NOT scaled.
+#   No HPA is attached.
+#
+# Why a separate deployment?
+#   - Isolates the stateful Telegram client from the stateless API layer.
+#   - API pods can be killed/replaced at will; the worker restarts gracefully.
+#   - Clear separation of concerns for ops: restarts, logs, resource limits.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: placement-worker
+  namespace: placement
+  labels:
+    app: placement-worker
+    component: worker
+spec:
+  replicas: 1              # MUST remain 1 — Telegram session is not shareable
+  selector:
+    matchLabels:
+      app: placement-worker
+  strategy:
+    type: Recreate         # Kill old pod before starting new (avoids dual session)
+  template:
+    metadata:
+      labels:
+        app: placement-worker
+        component: worker
+    spec:
+      terminationGracePeriodSeconds: 60   # Give worker time to drain Bull queue
+      containers:
+        - name: worker
+          image: YOUR_DOCKERHUB_USERNAME/placement-backend:latest   # Replace before apply
+          imagePullPolicy: Always
+          command: ["node", "worker.js"]   # Run worker entrypoint, not server.js
+          envFrom:
+            - configMapRef:
+                name: placement-config
+            - secretRef:
+                name: placement-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "400m"
+              memory: "512Mi"
+          livenessProbe:
+            exec:
+              # Worker doesn't expose HTTP; probe via process sentinel file
+              # For now use a simple shell check that node process is alive
+              command: ["sh", "-c", "kill -0 1"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
