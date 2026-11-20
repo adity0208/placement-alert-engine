@@ -21,7 +21,7 @@ app.use(express.json());
 app.use((req, res, next) => {
     const origin = req.headers.origin;
     const allowedOrigins = [
-        'https://vercel.app',
+        'https://placement-alert-engine.vercel.app',
         'http://localhost:5173',
         'http://localhost:3000'
     ];
