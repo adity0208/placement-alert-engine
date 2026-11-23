@@ -6,7 +6,7 @@
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-HPA%20%7C%20Worker-326CE5?logo=kubernetes&logoColor=white)](k8s/)
 [![Redis](https://img.shields.io/badge/Queue-BullMQ%20%2B%20Redis-DC382D?logo=redis&logoColor=white)](backend/lib/queue.js)
 [![Prometheus](https://img.shields.io/badge/Metrics-Prometheus%20%2B%20Grafana-E6522C?logo=prometheus&logoColor=white)](monitoring/)
-[![Tests](https://img.shields.io/badge/Tests-Jest%20%7C%2037%20Passed-C21325?logo=jest&logoColor=white)](backend/tests/)
+[![Tests](https://img.shields.io/badge/Tests-Jest%20%7C%2042%20Passed-C21325?logo=jest&logoColor=white)](backend/tests/)
 
 A resilient, event-driven, job and hackathon notification microservice. It monitors Telegram channels using the MTProto binary protocol, buffers payloads in a **BullMQ/Redis queue**, parses unstructured postings with a **3-Tier AI Fallback Engine** (Gemini (gemini-3.8-flash, then gemini-3.7-flash) → Groq (openai/gpt-oss-120b) → Local Regex), enforces deduplication via MongoDB compound indexing, streams alerts in real-time via WebSockets, and exports Prometheus metrics with Grafana dashboards.
 
@@ -103,9 +103,9 @@ Exposes `/metrics` in Prometheus format scraped every 15 seconds:
 | **API Framework** | Express.js, WebSockets (`ws`), `express-rate-limit` |
 | **Async Queue & Cache** | BullMQ v5, Redis 7 (ioredis) |
 | **Telegram Protocol** | GramJS (MTProto binary protocol) |
-| **AI Parsing** | Google GenAI SDK (Gemini (gemini-3.8-flash)) + Groq SDK (Llama 3.3 70B) |
+| **AI Parsing** | Google GenAI SDK (gemini-3.8-flash, gemini-3.7-flash) + Groq SDK (openai/gpt-oss-120b) |
 | **Database** | MongoDB Atlas / Mongoose (Compound unique index + 72h TTL) |
-| **Testing** | Jest 29, Supertest 7, Mocked AI & In-memory Repositories (37 tests) |
+| **Testing** | Jest 29, Supertest 7, Mocked AI & In-memory Repositories (42 tests) |
 | **Containers** | Docker (multi-stage, non-root users), Docker Compose |
 | **Orchestration** | Kubernetes (Deployments, HPA, Services, Ingress, kind/minikube) |
 | **CI/CD** | GitHub Actions (Lint, Test, Docker Buildx, Audit, CD push) |
@@ -202,7 +202,7 @@ cd backend
 npm test
 ```
 
-### Test Coverage Highlights (37/37 Tests Passing)
+### Test Coverage Highlights (42/42 Tests Passing)
 * **`tests/aiParser.test.js` (9 tests)**: Verifies Gemini JSON parsing with mocked responses, validates seamless failover to Groq on rate limits (HTTP 429), verifies deterministic regex fallback when all AI APIs are unreachable, and rejects non-job notifications.
 * **`tests/dedupe.test.js` (9 tests)**: Enforces compound unique constraint (`telegramMessageId` + `groupId`), verifies cross-channel `applyLink` deduplication, and tests rejection filters against congratulatory messages.
 * **`tests/jobModel.test.js` (11 tests)**: Validates Mongoose schema constraints, enum values (`job`, `hackathon`), 72-hour TTL pre-save calculation, and virtual property calculations.
