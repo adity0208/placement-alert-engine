@@ -1,280 +1,385 @@
-import { useState, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { 
-    Clock, 
-    Zap, 
-    Radio, 
-    GraduationCap, 
-    Building2, 
+    Briefcase, 
     Calendar, 
+    GraduationCap, 
     ExternalLink, 
     Copy, 
     Check, 
-    ChevronDown, 
-    ChevronRight,
-    Briefcase,
-    AlertCircle
+    X,
+    Clock,
+    MapPin,
+    Banknote
 } from 'lucide-react';
+import { parseLabelledMessage } from '../utils/parseLabelledMessage';
 
-// Strip repetitive raw LLM prefix labels (e.g. "Company name: Google" -> "Google")
+const GENERIC_TITLES = [
+    'placement opportunity',
+    'new opportunity',
+    'job opportunity',
+    'placement drive',
+    'hackathon event',
+    'notification',
+    'placement notice',
+    'job post',
+    'placement alert'
+];
+
+const PLACEHOLDERS = [
+    'any batch',
+    'students / freshers',
+    'eligible students',
+    'all students',
+    'null',
+    'undefined',
+    'n/a',
+    'all batches'
+];
+
+// Clean prefixes like "Company: Google" -> "Google"
 function cleanPrefix(text) {
-    if (!text || typeof text !== 'string') return text;
+    if (!text || typeof text !== 'string') return '';
     return text
         .replace(/^(company\s*name|company|job\s*role|role|title|organization|host|organizer)\s*:\s*/i, '')
         .trim();
 }
 
-// Extract first URL found anywhere in a string
-function extractUrl(text) {
-    const urlRegex = /https?:\/\/[^\s<>"]+/g;
-    const match = text.match(urlRegex);
-    return match ? match[0] : null;
+function isGeneric(str) {
+    if (!str || typeof str !== 'string') return true;
+    const clean = str.trim().toLowerCase();
+    if (clean.length === 0) return true;
+    if (/^https?:\/\//i.test(clean)) return true;
+    if (/\bnull\b|\bundefined\b/i.test(clean)) return true;
+    if (/\bis hiring for\b/i.test(clean)) return true;
+    return GENERIC_TITLES.includes(clean);
 }
 
-// Extract audience from salutation
-function extractAudience(message) {
+function isValidMeta(val) {
+    if (!val || typeof val !== 'string') return false;
+    const clean = val.trim().toLowerCase();
+    if (clean.length === 0) return false;
+    return !PLACEHOLDERS.includes(clean);
+}
+
+function formatRelativeTime(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '';
+    const diffSec = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (diffSec < 60) return 'just now';
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 30) return `${diffDays}d ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function getMonogram(company) {
+    if (!company) return null;
+    const parts = company.trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+        return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return company.slice(0, 2).toUpperCase();
+}
+
+// Convert links in message to clickable anchors
+function renderFormattedMessage(message) {
     if (!message) return null;
-    const match = message.match(/^dear\s+(b\.?tech\s+)?(\w+\s+)?students?,?\s*/i);
-    if (!match) return null;
-    
-    const prefix = match[0].toLowerCase();
-    if (prefix.includes('b.tech') || prefix.includes('btech')) return 'B.Tech';
-    if (prefix.includes('mca')) return 'MCA';
-    return 'All Students';
-}
+    const urlRegex = /(https?:\/\/[^\s<>"]+)/g;
+    const parts = message.split(urlRegex);
 
-// Parse a human-friendly company/title from the raw Telegram message
-function parseTitle(message) {
-    if (!message) return 'Job Opportunity';
-
-    // If the entire title field is a URL, skip it — handled separately
-    if (/^https?:\/\//i.test(message.trim())) return 'Job Opportunity';
-
-    let titleStr = '';
-
-    // Pattern: "<CompanyName> job post" (case-insensitive)
-    const jobPostMatch = message.match(/([A-Za-z0-9&.,'\- ]+?)\s+job\s+post/i);
-    if (jobPostMatch) {
-        titleStr = jobPostMatch[1].trim();
-    } else {
-        // Pattern: "hiring at <CompanyName>" or "opening at <CompanyName>"
-        const hiringAtMatch = message.match(/(?:hiring|opening)\s+at\s+([A-Za-z0-9&.,'\- ]+?)[\s,.\n]/i);
-        if (hiringAtMatch) {
-            titleStr = hiringAtMatch[1].trim();
-        } else {
-            // Pattern: "from <CompanyName>" near the start
-            const fromMatch = message.match(/from\s+([A-Za-z0-9&.,'\- ]+?)[\s,.\n]/i);
-            if (fromMatch) {
-                const candidate = fromMatch[1].trim();
-                if (candidate.length > 2 && candidate.length < 40) titleStr = candidate;
-            }
+    return parts.map((part, index) => {
+        if (/^https?:\/\//i.test(part)) {
+            return (
+                <a
+                    key={index}
+                    href={part}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    {part}
+                </a>
+            );
         }
-    }
-
-    if (!titleStr) {
-        // Fallback: strip salutation and take first 6 meaningful words
-        const stripped = message.replace(/^dear\s+(b\.?tech\s+)?(\w+\s+)?students?,?\s*/i, '').trim();
-        const words = stripped.split(/\s+/).slice(0, 6);
-        titleStr = words.join(' ') + (stripped.split(/\s+/).length > 6 ? '…' : '');
-    }
-
-    // Unconditionally strip salutation from the start of the extracted title
-    titleStr = titleStr.replace(/^dear\s+(b\.?tech\s+)?(\w+\s+)?students?,?\s*/i, '').trim();
-
-    if (/^(kindly|please)\b/i.test(titleStr)) {
-        titleStr = 'Placement Notice';
-    } else if (titleStr.length > 0) {
-        // Capitalize properly
-        titleStr = titleStr.charAt(0).toUpperCase() + titleStr.slice(1);
-    }
-
-    return titleStr || 'Placement Notice';
+        return part;
+    });
 }
 
 export default function JobCard({ job }) {
-    const [timeRemaining, setTimeRemaining] = useState('');
-    const [isExpiringSoon, setIsExpiringSoon] = useState(false);
-    const [isExpanded, setIsExpanded] = useState(false);
+    const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [copied, setCopied] = useState(false);
+    const triggerRef = useRef(null);
 
-    useEffect(() => {
-        const updateTimer = () => {
-            if (!job || !job.expiresAt) return;
-            const now = new Date();
-            const expiry = new Date(job.expiresAt);
-            const diff = expiry - now;
-
-            if (diff <= 0) {
-                setTimeRemaining('Expired');
-                setIsExpiringSoon(false);
-                return;
-            }
-
-            const hours = Math.floor(diff / (1000 * 60 * 60));
-            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-            setTimeRemaining(`${hours}h ${minutes}m`);
-            setIsExpiringSoon(hours < 6);
-        };
-
-        updateTimer();
-        const interval = setInterval(updateTimer, 60000);
-        return () => clearInterval(interval);
-    }, [job?.expiresAt]);
-
-    const formatDate = (dateString) => {
-        if (!dateString) return '';
-        const date = new Date(dateString);
-        return date.toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+    const closeDetails = () => {
+        setIsDetailsOpen(false);
+        triggerRef.current?.focus();
     };
+
+    // Keyboard support: Escape closes dialog and returns focus
+    useEffect(() => {
+        if (!isDetailsOpen) return;
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                closeDetails();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isDetailsOpen]);
+
+    const targetUrl = job.applyLink || job.link || null;
 
     const handleCopy = () => {
-        navigator.clipboard.writeText(job?.message || '');
+        if (!targetUrl) return;
+        navigator.clipboard.writeText(targetUrl);
         setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        setTimeout(() => setCopied(false), 1500);
     };
 
-    // Determine raw title URL checks for fallback
-    const rawTitle = job?.title || '';
-    const isTitleUrl = /^https?:\/\//i.test(rawTitle.trim());
+    // Primary Heading & Company determination:
+    const rawRole = job.jobRole && !isGeneric(job.jobRole) ? cleanPrefix(job.jobRole) : null;
+    const rawCompany = job.companyName && !isGeneric(job.companyName) ? cleanPrefix(job.companyName) : null;
+    const titleClean = cleanPrefix(job.title);
 
-    // Resolve presentation text using structured AI fields with bulletproof fallbacks and prefix sanitization
-    const isAI = !!job?.isAIParsed;
-    const rawCompany = isAI ? (job.companyName || "New Opportunity") : (isTitleUrl ? "Job Opportunity" : parseTitle(job?.message || rawTitle));
-    const rawRole = isAI ? (job.jobRole || "Placement Drive") : "Placement Alert";
+    // If companyName or jobRole are missing or default, extract labelled values from message
+    const isMissingData = !rawCompany || !rawRole;
+    const extracted = isMissingData ? parseLabelledMessage(job.message) : null;
 
-    const companyName = cleanPrefix(rawCompany);
-    const jobRole = cleanPrefix(rawRole);
+    const parsedRole = extracted?.jobRole && !isGeneric(extracted.jobRole) ? cleanPrefix(extracted.jobRole) : null;
+    const parsedCompany = extracted?.companyName && !isGeneric(extracted.companyName) ? cleanPrefix(extracted.companyName) : null;
 
-    const eligibility = cleanPrefix(isAI ? job.eligibility : extractAudience(job?.message || rawTitle));
-    const deadline = cleanPrefix(isAI ? job.deadline : null);
-    const experience = cleanPrefix(job?.experience);
-    const targetBatch = cleanPrefix(job?.targetBatch);
-    const sourceName = job?.sourceName;
+    const effectiveRole = rawRole || parsedRole;
+    const effectiveCompany = rawCompany || parsedCompany;
+    const extractedLocation = extracted?.location || null;
+    const extractedStipend = extracted?.stipend || null;
+    const extractedBatch = extracted?.batch || null;
 
-    // Resolve application URL
-    const applyLink = job?.applyLink || job?.link || extractUrl(job?.message || '') || (isTitleUrl ? rawTitle : null);
+    // Heading priority: Role (if present) > Company (if present) > default.
+    // Subtitle: Company (if role was used as heading) or empty.
+    let heading = '';
+    let subtitle = '';
 
-    // Strip salutation for a clean presentation
-    const displayMessage = (job?.message || '').replace(/^dear\s+(b\.?tech\s+)?(\w+\s+)?students?,?\s*/i, '').trim();
+    if (effectiveRole) {
+        heading = effectiveRole;
+        if (effectiveCompany) {
+            subtitle = effectiveCompany;
+        }
+    } else if (effectiveCompany) {
+        heading = effectiveCompany;
+        subtitle = '';
+    } else if (titleClean && !isGeneric(titleClean)) {
+        heading = titleClean;
+        subtitle = '';
+    } else if (job.message) {
+        const meaningfulLine = job.message
+            .split('\n')
+            .map(line => line.replace(/https?:\/\/[^\s<>"]+/g, '').trim())
+            .find(line => line.length > 5);
 
-    const avatarLetter = companyName ? companyName.charAt(0).toUpperCase() : 'B';
+        if (meaningfulLine) {
+            const cleanedLine = cleanPrefix(meaningfulLine);
+            heading = cleanedLine.length > 70 
+                ? `${cleanedLine.slice(0, 67)}...` 
+                : cleanedLine;
+        }
+    }
+    if (!heading) {
+        heading = 'Role details in message';
+    }
+
+    const showMutedDetails = !subtitle && !effectiveCompany && !effectiveRole;
+
+    // Monogram
+    const monogram = effectiveCompany ? getMonogram(effectiveCompany) : (heading ? getMonogram(heading) : null);
+
+    // Time
+    const fullDate = job.createdAt ? new Date(job.createdAt).toLocaleString() : '';
+    const relativeTime = formatRelativeTime(job.createdAt);
+
+    // 3-line clamped preview text (stripping URLs)
+    const previewText = (job.message || '')
+        .replace(/https?:\/\/[^\s<>"]+/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 
     return (
-        <div className={`job-card ${isExpiringSoon ? 'expiring-soon' : ''}`}>
-            {/* Top header row: Dynamic Brand Avatar + Role / Company details */}
-            <div className="job-card-top">
-                <div className="company-avatar">
-                    {avatarLetter}
-                </div>
-                <div className="job-header-info">
-                    <span className="job-role-text">{jobRole}</span>
-                    <h3 className="job-company-name">{companyName}</h3>
-                </div>
-            </div>
-
-            {/* Sub-meta details row */}
-            <div style={{ marginTop: '0.25rem' }}>
-                <div className="job-meta">
-                    <span className="meta-item">
-                        <Clock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                        {formatDate(job?.createdAt)}
-                    </span>
-                    {(isExpiringSoon || timeRemaining === 'Expired') && timeRemaining && (
-                        <span className={`meta-item timer ${timeRemaining === 'Expired' ? 'expired' : ''}`}>
-                            <Zap className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                            {timeRemaining}
-                        </span>
-                    )}
-                    {sourceName && (
-                        <span className="meta-item">
-                            <Radio className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                            {sourceName}
-                        </span>
-                    )}
+        <article className="job-card">
+            {/* Header */}
+            <div className="job-card-header">
+                <div className="job-card-brand">
+                    <div className="job-card-avatar" aria-hidden="true">
+                        {monogram ? monogram : <Briefcase className="w-4 h-4 text-[var(--muted)]" />}
+                    </div>
+                    <div className="job-card-headings">
+                        <h3 className="job-card-title" title={heading}>
+                            {heading}
+                        </h3>
+                        {subtitle && (
+                            <span className="job-card-company" title={subtitle}>
+                                {subtitle}
+                            </span>
+                        )}
+                        {showMutedDetails && (
+                            <span className="job-card-company muted-details">
+                                Details in message
+                            </span>
+                        )}
+                    </div>
                 </div>
 
-                {/* Flat monochrome tag pills */}
-                <div className="badge-container">
-                    {targetBatch && (
-                        <span className="premium-badge">
-                            <GraduationCap className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                            <span>Batch: {targetBatch}</span>
-                        </span>
-                    )}
-                    {experience && (
-                        <span className="premium-badge">
-                            <Building2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                            <span>Experience: {experience}</span>
-                        </span>
-                    )}
-                    {eligibility && (
-                        <span className="premium-badge">
-                            <Briefcase className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                            <span>Criteria: {eligibility}</span>
-                        </span>
-                    )}
-                    {deadline && (
-                        <span className="premium-badge">
-                            <Calendar className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                            <span>Deadline: {deadline}</span>
-                        </span>
-                    )}
-                </div>
-            </div>
-
-            {/* Accordion collapsable toggle */}
-            <button 
-                onClick={() => setIsExpanded(!isExpanded)} 
-                className="accordion-trigger flex items-center justify-between"
-                aria-expanded={isExpanded}
-            >
-                <span>{isExpanded ? 'Hide Details' : 'Show Message Details'}</span>
-                {isExpanded ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
-            </button>
-
-            <div className={`accordion-content ${isExpanded ? 'expanded' : ''}`}>
-                <p className="job-accordion-text">{displayMessage}</p>
-            </div>
-
-            {/* Lower row buttons */}
-            <div className="job-actions">
-                {applyLink ? (
-                    <a
-                        href={applyLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="btn btn-primary"
+                {relativeTime && (
+                    <time 
+                        className="job-card-time" 
+                        dateTime={job.createdAt} 
+                        title={fullDate}
                     >
-                        <ExternalLink className="w-4 h-4 shrink-0 mr-1.5" />
-                        Apply Now
-                    </a>
-                ) : (
-                    <button className="btn disabled" disabled>
-                        <AlertCircle className="w-4 h-4 shrink-0 mr-1.5" />
-                        Link Not Found
-                    </button>
+                        {relativeTime}
+                    </time>
                 )}
-                <button
-                    onClick={handleCopy}
-                    className="btn btn-secondary"
-                >
-                    {copied ? (
-                        <>
-                            <Check className="w-4 h-4 shrink-0 mr-1.5 text-emerald-500" />
-                            Copied
-                        </>
-                    ) : (
-                        <>
-                            <Copy className="w-4 h-4 shrink-0 mr-1.5" />
-                            Copy
-                        </>
+            </div>
+
+            {/* Body */}
+            <div className="job-card-body">
+                {/* Metadata badges strictly for existing fields */}
+                <div className="job-card-badges">
+                    {extractedLocation && (
+                        <span className="job-meta-badge" title="Location">
+                            <MapPin className="w-3.5 h-3.5 text-[var(--muted)] shrink-0" />
+                            <span>{extractedLocation}</span>
+                        </span>
                     )}
+
+                    {extractedStipend && (
+                        <span className="job-meta-badge" title="Stipend / CTC">
+                            <Banknote className="w-3.5 h-3.5 text-[var(--muted)] shrink-0" />
+                            <span>{extractedStipend}</span>
+                        </span>
+                    )}
+
+                    {(isValidMeta(job.targetBatch) || (extractedBatch && !isValidMeta(job.targetBatch))) && (
+                        <span className="job-meta-badge" title="Target Graduation Batch">
+                            <GraduationCap className="w-3.5 h-3.5 text-[var(--muted)] shrink-0" />
+                            <span>{isValidMeta(job.targetBatch) ? job.targetBatch : extractedBatch}</span>
+                        </span>
+                    )}
+
+                    {isValidMeta(job.experience) && (
+                        <span className="job-meta-badge" title="Experience Requirement">
+                            <Briefcase className="w-3.5 h-3.5 text-[var(--muted)] shrink-0" />
+                            <span>{job.experience}</span>
+                        </span>
+                    )}
+
+                    {isValidMeta(job.eligibility) && (
+                        <span className="job-meta-badge" title="Eligibility Criteria">
+                            <span>{job.eligibility}</span>
+                        </span>
+                    )}
+
+                    {isValidMeta(job.deadline) && (
+                        <span className="job-meta-badge deadline-badge" title="Application Deadline">
+                            <Clock className="w-3.5 h-3.5 text-[var(--warning)] shrink-0" />
+                            <span>{job.deadline}</span>
+                        </span>
+                    )}
+                </div>
+
+                {/* 3-line clamped preview text */}
+                {previewText && (
+                    <p className="job-card-preview">
+                        {previewText}
+                    </p>
+                )}
+
+                {/* View Full Message button */}
+                <button
+                    ref={triggerRef}
+                    type="button"
+                    className="job-view-details-btn"
+                    onClick={() => setIsDetailsOpen(true)}
+                    aria-expanded={isDetailsOpen}
+                >
+                    View full message
                 </button>
             </div>
-        </div>
+
+            {/* Footer */}
+            <footer className="job-card-footer">
+                {targetUrl ? (
+                    <a
+                        href={targetUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="job-apply-btn"
+                    >
+                        <span>Apply</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                ) : (
+                    <button
+                        type="button"
+                        disabled
+                        className="job-apply-btn disabled"
+                        title="No application link in this notice"
+                    >
+                        <span>Apply</span>
+                    </button>
+                )}
+
+                <button
+                    type="button"
+                    onClick={handleCopy}
+                    disabled={!targetUrl}
+                    className="job-copy-btn"
+                    aria-label={copied ? "Application link copied" : "Copy application link"}
+                    title={targetUrl ? (copied ? "Copied!" : "Copy application link") : "No link available"}
+                >
+                    {copied ? (
+                        <Check className="w-4 h-4 text-[var(--live)]" />
+                    ) : (
+                        <Copy className="w-4 h-4" />
+                    )}
+                    {copied && <span className="job-copy-tooltip">Copied</span>}
+                </button>
+            </footer>
+
+            {/* Accessible Full Message Side Panel / Dialog */}
+            {isDetailsOpen && (
+                <div
+                    className="message-dialog-backdrop"
+                    onClick={closeDetails}
+                    role="presentation"
+                >
+                    <div
+                        className="message-dialog"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby={`dialog-title-${job._id}`}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <header className="message-dialog-header">
+                            <h3 id={`dialog-title-${job._id}`} className="message-dialog-title">
+                                {heading}
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={closeDetails}
+                                className="message-dialog-close"
+                                aria-label="Close message details"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </header>
+                        <div className="message-dialog-body">
+                            {renderFormattedMessage(job.message)}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </article>
     );
 }

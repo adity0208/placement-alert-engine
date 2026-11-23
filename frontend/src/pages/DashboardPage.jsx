@@ -333,8 +333,8 @@ function renderRecentActivity(items) {
       <div className="activity-content">
         <h4 className="activity-title">
           {item.type === 'job'
-            ? `${item.companyName || 'Company'} is hiring for ${item.jobRole || 'Role'}`
-            : item.title || 'Hackathon Event'
+            ? (item.jobRole || item.companyName || item.title || 'Job Opportunity')
+            : (item.title || 'Hackathon Event')
           }
         </h4>
         <p className="activity-time">
