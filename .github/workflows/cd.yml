@@ -1,18 +1,14 @@
-name: CD — Build & Push
+name: CD - Build and Push
 
 on:
-  push:
-    branches: [main]
-    tags:
-      - 'v*.*.*'
+  workflow_dispatch:
 
 jobs:
   build-and-push:
-    name: Build & Push Docker Images
+    name: Build and Push Docker Images
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -24,15 +20,14 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels)
+      - name: Extract metadata for backend
         id: meta-backend
         uses: docker/metadata-action@v5
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/placement-backend
           tags: |
             type=sha,prefix=sha-
-            type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
 
       - name: Extract metadata for frontend
         id: meta-frontend
@@ -41,10 +36,9 @@ jobs:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/placement-frontend
           tags: |
             type=sha,prefix=sha-
-            type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
 
-      - name: Build & push backend
+      - name: Build and push backend
         uses: docker/build-push-action@v5
         with:
           context: ./backend
@@ -55,7 +49,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build & push frontend
+      - name: Build and push frontend
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
@@ -65,16 +59,3 @@ jobs:
           labels: ${{ steps.meta-frontend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  notify-deploy:
-    name: Trigger Deploy
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Rolling restart via kubectl (example)
-        run: |
-          echo "Deploy step: configure kubectl and run:"
-          echo "  kubectl rollout restart deployment/placement-api -n placement"
-          echo "  kubectl rollout restart deployment/placement-worker -n placement"
-          echo "Add KUBE_CONFIG secret and real kubectl commands once cluster is ready."
