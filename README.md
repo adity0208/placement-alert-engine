@@ -1,4 +1,4 @@
-# Placement Alert Engine — Production Cloud Architecture
+# Placement Alert Engine — Architecture
 
 [![CI](https://github.com/adity0208/placement-alert-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/adity0208/placement-alert-engine/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -8,7 +8,7 @@
 [![Prometheus](https://img.shields.io/badge/Metrics-Prometheus%20%2B%20Grafana-E6522C?logo=prometheus&logoColor=white)](monitoring/)
 [![Tests](https://img.shields.io/badge/Tests-Jest%20%7C%2037%20Passed-C21325?logo=jest&logoColor=white)](backend/tests/)
 
-A resilient, event-driven, production-grade job and hackathon notification microservice. It monitors Telegram channels using the MTProto binary protocol, buffers payloads in a **BullMQ/Redis queue**, parses unstructured postings with a **3-Tier AI Fallback Engine** (Google Gemini 2.0 Flash → Groq Llama 3.3 70B → Local Regex), enforces deduplication via MongoDB compound indexing, streams alerts in real-time via WebSockets, and exports Prometheus metrics with Grafana dashboards.
+A resilient, event-driven, job and hackathon notification microservice. It monitors Telegram channels using the MTProto binary protocol, buffers payloads in a **BullMQ/Redis queue**, parses unstructured postings with a **3-Tier AI Fallback Engine** (Gemini (gemini-3.8-flash, then gemini-3.7-flash) → Groq (openai/gpt-oss-120b) → Local Regex), enforces deduplication via MongoDB compound indexing, streams alerts in real-time via WebSockets, and exports Prometheus metrics with Grafana dashboards.
 
 Containerized with multi-stage Docker builds, automated by GitHub Actions CI/CD, and orchestrated on Kubernetes with a stateless API tier (auto-scaled via HPA) and a dedicated single-replica stateful ingestion worker.
 
@@ -39,7 +39,7 @@ Containerized with multi-stage Docker builds, automated by GitHub Actions CI/CD,
                       ┌───────────────────────────────────────┐
                       │      3-Tier AI Fallback Engine        │
                       │ 1. Gemini Flash (Google GenAI SDK)    │
-                      │ 2. Groq Llama 3.3 70B (Failover)     │
+                      │ 2. Groq (openai/gpt-oss-120b) (Failover)     │
                       │ 3. Deterministic Local Regex Engine   │
                       └──────────────────┬────────────────────┘
                                          │
@@ -76,12 +76,12 @@ Containerized with multi-stage Docker builds, automated by GitHub Actions CI/CD,
 * **Idempotent Job Processing**: Jobs are assigned an idempotent key (`${groupId}-${messageId}`) to prevent redundant processing during network retries or listener reconnections.
 
 ### 2. Multi-Tier AI Fallback Engine (`backend/aiParser.js`)
-* **Tier 1 (Primary)**: Google Gemini API (`gemini-2.0-flash`) with structured JSON schema enforcement.
+* **Tier 1 (Primary)**: Google Gemini API (`gemini-3.8-flash`) with structured JSON schema enforcement.
 * **Tier 2 (Failover)**: Groq API (`llama-3.3-70b-versatile`). Automatically absorbs traffic within milliseconds if Gemini encounters HTTP 429 rate limits or quota exhaustion.
-* **Tier 3 (Local Offline Fallback)**: Deterministic regex and keyword rules engine. Operates with zero network dependency to guarantee 100% ingestion uptime.
+* **Tier 3 (Local Offline Fallback)**: Deterministic regex and keyword rules engine. Works with no network access, so ingestion continues when both AI providers are unavailable.
 
-### 3. Production Kubernetes Topology (kind & minikube ready)
-* **API Deployment (`k8s/api/`)**: Fully stateless Express and WebSocket API. Configured with a `HorizontalPodAutoscaler` (HPA) scaling between 2 and 6 pods on 70% CPU / 80% memory utilization. Liveness (`/`) and readiness (`/api/ping`) probes ensure zero-downtime rolling updates.
+### 3. Kubernetes manifests (validated locally on kind/minikube)
+* **API Deployment (`k8s/api/`)**: Fully stateless Express and WebSocket API. Configured with a `HorizontalPodAutoscaler` (HPA) scaling between 2 and 6 pods on 70% CPU / 80% memory utilization. Liveness (`/`) and readiness (`/api/ping`) probes are configured.
 * **Ingestion Worker Deployment (`k8s/worker/`)**: Fixed at **exactly 1 replica** with `Recreate` update strategy. The Telegram `SESSION_STRING` authenticates a single MTProto session and cannot be shared across multiple concurrent pods without session invalidation.
 
 ### 4. Enterprise Observability (`backend/lib/metrics.js`)
@@ -103,13 +103,13 @@ Exposes `/metrics` in Prometheus format scraped every 15 seconds:
 | **API Framework** | Express.js, WebSockets (`ws`), `express-rate-limit` |
 | **Async Queue & Cache** | BullMQ v5, Redis 7 (ioredis) |
 | **Telegram Protocol** | GramJS (MTProto binary protocol) |
-| **AI Parsing** | Google GenAI SDK (Gemini 2.0 Flash) + Groq SDK (Llama 3.3 70B) |
+| **AI Parsing** | Google GenAI SDK (Gemini (gemini-3.8-flash)) + Groq SDK (Llama 3.3 70B) |
 | **Database** | MongoDB Atlas / Mongoose (Compound unique index + 72h TTL) |
 | **Testing** | Jest 29, Supertest 7, Mocked AI & In-memory Repositories (37 tests) |
 | **Containers** | Docker (multi-stage, non-root users), Docker Compose |
 | **Orchestration** | Kubernetes (Deployments, HPA, Services, Ingress, kind/minikube) |
 | **CI/CD** | GitHub Actions (Lint, Test, Docker Buildx, Audit, CD push) |
-| **Observability** | Prometheus (`prom-client`), Grafana dashboards, Alertmanager rules |
+| **Observability** | Prometheus (`prom-client`), Grafana dashboards, Prometheus alert rules |
 | **Frontend** | React 18, Vite, Lucide Icons, Nginx reverse proxy |
 
 ---
@@ -135,7 +135,7 @@ docker-compose up --build -d
 ### 3. Verify Endpoints
 | Service | URL | Credentials / Notes |
 |---|---|---|
-| **Frontend Web App** | `http://localhost:80` | Production React SPA served via Nginx |
+| **Frontend Web App** | `http://localhost:80` | React SPA served via Nginx |
 | **Backend API Health** | `http://localhost:5000/` | Returns JSON status & WebSocket client count |
 | **Backend Readiness** | `http://localhost:5000/api/ping` | Returns `pong` |
 | **Prometheus Metrics** | `http://localhost:5000/metrics` | Raw Prometheus metric exposition |
@@ -146,7 +146,7 @@ docker-compose up --build -d
 
 ## ☸️ Kubernetes Deployment (kind / minikube)
 
-Validating production Kubernetes objects locally with [kind](https://kind.sigs.k8s.io/) or [minikube](https://minikube.sigs.k8s.io/):
+Validating the Kubernetes objects locally with [kind](https://kind.sigs.k8s.io/) or [minikube](https://minikube.sigs.k8s.io/):
 
 ### Option A: Using kind (Recommended)
 
@@ -229,10 +229,8 @@ Located in `.github/workflows/`:
 ## 📑 Resume & Interview Talking Points
 
 ### For Backend Engineering Roles
-> *"Architected an event-driven notification microservice in Node.js (ESM) processing Telegram announcements via MTProto. Designed a 3-tier resilient parser using Gemini 2.0 Flash with automatic sub-second failover to Groq Llama 3.3 and local regex rules to guarantee 100% parsing uptime. Decoupled ingestion from heavy AI inference using a BullMQ/Redis async queue with exponential backoff retries. Implemented MongoDB compound indexing (`{ telegramMessageId: 1, groupId: 1 }`) and TTL indexes for zero data loss and automated 72-hour cleanup. Wrote 37 automated tests with Jest and Supertest across schema validation, deduplication, and route logic."*
 
 ### For DevOps & SRE Roles
-> *"Containerized a decoupled Node.js and React stack using multi-stage Dockerfiles and unprivileged non-root users (`uid 1001`), cutting runtime footprint by ~70%. Authored complete Kubernetes manifests dividing the system into an auto-scaled stateless API tier (HPA scaling 2–6 pods on CPU/memory thresholds) and a single-replica stateful ingestion worker to prevent MTProto session conflicts. Instrumented the application with Prometheus (`prom-client`) exposing 5 custom metrics (p95 parse duration, queue depth, ingestion throughput, Gemini failover rate), accompanied by preconfigured Alertmanager alert rules and Grafana SRE dashboards. Built a 4-stage GitHub Actions CI/CD pipeline running automated tests against Redis service containers and pushing tagged images to registries."*
 
 ---
 
