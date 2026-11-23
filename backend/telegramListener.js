@@ -286,11 +286,16 @@ async function hydrateFromHistory() {
                             continue;
                         }
                     }
+                    const resolvedTitle = parsed.type === 'job'
+                        ? ((parsed.jobRole && !/^(null|undefined|role)$/i.test(parsed.jobRole.trim())) ? parsed.jobRole.trim()
+                           : (parsed.companyName && !/^(null|undefined|placement opportunity)$/i.test(parsed.companyName.trim())) ? parsed.companyName.trim()
+                           : (parsed.title && !/^(null|undefined|job opportunity)$/i.test(parsed.title.trim()) && !/\bis hiring for\b/i.test(parsed.title)) ? parsed.title.trim()
+                           : 'Job Opportunity')
+                        : ((parsed.title && !/^(null|undefined)$/i.test(parsed.title.trim())) ? parsed.title.trim() : 'Hackathon Event');
+
                     const jobData = {
                         type: parsed.type, // 'job' or 'hackathon'
-                        title: parsed.type === 'job' 
-                            ? `${parsed.companyName} is hiring for ${parsed.jobRole || 'Role'}`
-                            : parsed.title,
+                        title: resolvedTitle,
                         message: messageText,
                         link: parsed.applyLink,
                         companyName: parsed.companyName,

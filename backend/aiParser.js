@@ -94,11 +94,11 @@ function localFallbackParse(text) {
   const isJob = JOB_KEYWORDS.some(k => textLower.includes(k)) || applyLink;
 
   if (isJob) {
-    let companyName = 'Placement Opportunity';
+    let companyName = null;
     const hiringAtMatch = text.match(/(?:hiring|opening|drive|at)\s+([A-Za-z0-9&.,'\- ]+?)[\s,.\n]/i);
     if (hiringAtMatch) {
       const candidate = hiringAtMatch[1].trim();
-      if (candidate.length > 2 && candidate.length < 30) {
+      if (candidate.length > 2 && candidate.length < 30 && !/^(null|undefined|placement opportunity)$/i.test(candidate)) {
         companyName = candidate;
       }
     }
@@ -106,13 +106,13 @@ function localFallbackParse(text) {
     return {
       type: 'job',
       companyName: companyName,
-      title: 'Job Opportunity',
-      jobRole: 'Placement Drive',
+      title: companyName || 'Job Opportunity',
+      jobRole: null,
       deadline: null,
       applyLink: applyLink,
-      eligibility: 'Eligible Students',
-      experience: 'Students / Freshers',
-      targetBatch: 'Any Batch',
+      eligibility: null,
+      experience: null,
+      targetBatch: null,
       organizer: null,
       prizePool: null
     };
@@ -324,16 +324,38 @@ export async function parseJobMessage(rawTelegramText, forceLocal = false) {
     endLocal();
   }
 
+  const role = cleanData.jobRole && typeof cleanData.jobRole === 'string' && cleanData.jobRole.trim() && !/^(null|undefined|role|placement drive)$/i.test(cleanData.jobRole.trim())
+    ? cleanData.jobRole.trim()
+    : null;
+  const company = cleanData.companyName && typeof cleanData.companyName === 'string' && cleanData.companyName.trim() && !/^(null|undefined|placement opportunity)$/i.test(cleanData.companyName.trim())
+    ? cleanData.companyName.trim()
+    : null;
+
+  let resolvedTitle;
+  if (cleanData.type === 'job') {
+    if (role) {
+      resolvedTitle = role;
+    } else if (company) {
+      resolvedTitle = company;
+    } else {
+      resolvedTitle = 'Job Opportunity';
+    }
+  } else {
+    resolvedTitle = (cleanData.title && typeof cleanData.title === 'string' && cleanData.title.trim() && !/^(null|undefined)$/i.test(cleanData.title.trim()))
+      ? cleanData.title.trim()
+      : 'Hackathon Event';
+  }
+
   return {
     type: cleanData.type || 'other',
-    companyName: cleanData.companyName || null,
-    title: cleanData.title || (cleanData.type === 'job' ? 'Job Opportunity' : 'Hackathon Event'),
-    jobRole: cleanData.jobRole || null,
+    companyName: company,
+    title: resolvedTitle,
+    jobRole: role,
     deadline: cleanData.deadline || null,
     applyLink: cleanData.applyLink || null,
-    eligibility: cleanData.eligibility || null,
-    experience: cleanData.experience || null,
-    targetBatch: cleanData.targetBatch || null,
+    eligibility: cleanData.eligibility && !/^(eligible students|all students|null|undefined)$/i.test(cleanData.eligibility.trim()) ? cleanData.eligibility.trim() : null,
+    experience: cleanData.experience && !/^(students \/ freshers|null|undefined)$/i.test(cleanData.experience.trim()) ? cleanData.experience.trim() : null,
+    targetBatch: cleanData.targetBatch && !/^(any batch|null|undefined)$/i.test(cleanData.targetBatch.trim()) ? cleanData.targetBatch.trim() : null,
     organizer: cleanData.organizer || null,
     prizePool: cleanData.prizePool || null
   };

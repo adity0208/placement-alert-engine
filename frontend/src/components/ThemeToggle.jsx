@@ -1,43 +1,42 @@
 import { useState, useEffect } from 'react';
 import { Sun, Moon } from 'lucide-react';
 
-export default function ThemeToggle() {
+export default function ThemeToggle({ className }) {
     const [isDark, setIsDark] = useState(() => {
-        const saved = localStorage.getItem('placement_theme');
-        if (saved !== null) {
-            return saved === 'dark';
-        }
+        try {
+            const saved = localStorage.getItem('placement_theme');
+            if (saved !== null) {
+                return saved === 'dark';
+            }
+        } catch (e) {}
         return window.matchMedia('(prefers-color-scheme: dark)').matches;
     });
 
     useEffect(() => {
         const root = document.documentElement;
-        if (isDark) {
-            root.classList.add('dark');
-            localStorage.setItem('placement_theme', 'dark');
-        } else {
-            root.classList.remove('dark');
-            localStorage.setItem('placement_theme', 'light');
-        }
+        try {
+            if (isDark) {
+                root.classList.add('dark');
+                localStorage.setItem('placement_theme', 'dark');
+            } else {
+                root.classList.remove('dark');
+                localStorage.setItem('placement_theme', 'light');
+            }
+        } catch (e) {}
     }, [isDark]);
 
     return (
         <button
+            type="button"
             onClick={() => setIsDark(!isDark)}
-            className="theme-toggle-btn"
-            title={isDark ? "Switch to Warm Light Mode" : "Switch to Pitch Black Dark Mode"}
-            aria-label="Toggle Theme"
+            className={className || "footer-ghost-btn"}
+            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            aria-label={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
         >
             {isDark ? (
-                <>
-                    <Sun className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>Light Mode</span>
-                </>
+                <Sun className="w-[18px] h-[18px] shrink-0" width={18} height={18} />
             ) : (
-                <>
-                    <Moon className="w-4 h-4 text-zinc-400 shrink-0" />
-                    <span>Dark Mode</span>
-                </>
+                <Moon className="w-[18px] h-[18px] shrink-0" width={18} height={18} />
             )}
         </button>
     );

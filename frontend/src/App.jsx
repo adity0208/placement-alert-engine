@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import JobsPage from './pages/JobsPage';
 import HackathonsPage from './pages/HackathonsPage';
@@ -98,6 +98,24 @@ function App() {
         ? hackathons
         : hackathons.filter(h => h.sourceName === selectedSource);
 
+    const [isCollapsed, setIsCollapsed] = useState(() => {
+        try {
+            return localStorage.getItem('placement_sidebar_collapsed') === 'true';
+        } catch (e) {
+            return false;
+        }
+    });
+
+    const toggleCollapse = () => {
+        setIsCollapsed(prev => {
+            const next = !prev;
+            try {
+                localStorage.setItem('placement_sidebar_collapsed', String(next));
+            } catch (e) {}
+            return next;
+        });
+    };
+
     // Reset filtering if current selected source disappears (e.g. cache clearance)
     useEffect(() => {
         if (selectedSource !== 'all' && !activeSources.includes(selectedSource)) {
@@ -105,8 +123,26 @@ function App() {
         }
     }, [jobs, hackathons]);
 
+    // Group jobs and hackathons count by sourceName
+    const sourceCounts = useMemo(() => {
+        const counts = {};
+        for (const j of jobs) {
+            if (j.sourceName) {
+                counts[j.sourceName] = (counts[j.sourceName] || 0) + 1;
+            }
+        }
+        for (const h of hackathons) {
+            if (h.sourceName) {
+                counts[h.sourceName] = (counts[h.sourceName] || 0) + 1;
+            }
+        }
+        return counts;
+    }, [jobs, hackathons]);
+
+    const totalCount = jobs.length + hackathons.length;
+
     return (
-        <div className="app">
+        <div className={`app ${isCollapsed ? 'sidebar-collapsed' : ''}`}>
             <Sidebar
                 currentPage={currentPage}
                 setCurrentPage={setCurrentPage}
@@ -116,6 +152,10 @@ function App() {
                 sources={activeSources}
                 selectedSource={selectedSource}
                 setSelectedSource={setSelectedSource}
+                sourceCounts={sourceCounts}
+                totalCount={totalCount}
+                isCollapsed={isCollapsed}
+                toggleCollapse={toggleCollapse}
             />
 
             <main className="main-content">

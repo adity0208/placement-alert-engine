@@ -137,6 +137,28 @@ describe('Tier 1 — Gemini', () => {
     expect(mockGeminiGenerateContent.mock.calls[1][0].model).toBe('gemini-3.7-flash');
     expect(mockGroqCreate).not.toHaveBeenCalled();
   });
+
+  test('notice with no company and no role does not produce title containing null, undefined or is hiring for', async () => {
+    mockGeminiGenerateContent.mockResolvedValueOnce({
+      text: JSON.stringify({
+        type: 'job',
+        companyName: null,
+        jobRole: null,
+        title: null,
+        applyLink: 'https://careers.google.com/apply',
+        eligibility: null,
+        experience: null,
+        targetBatch: null,
+        deadline: null,
+      }),
+    });
+
+    const result = await parseJobMessage(JOB_MESSAGE);
+    expect(result.type).toBe('job');
+    expect(result.title).toBe('Job Opportunity');
+    expect(result.title).not.toMatch(/\bnull\b|\bundefined\b/i);
+    expect(result.title).not.toMatch(/\bis hiring for\b/i);
+  });
 });
 
 // ── Tier 2: Groq failover ─────────────────────────────────────────────────────
@@ -208,6 +230,14 @@ describe('Tier 3 — Local regex fallback', () => {
   test('local parser falls back to "other" for unclassifiable text', async () => {
     const result = await parseJobMessage('Good morning everyone!', true);
     expect(result.type).toBe('other');
+  });
+
+  test('local fallback with no company and no role does not produce title containing null, undefined or is hiring for', async () => {
+    const genericJobMsg = 'Apply now at https://careers.example.com/portal for recent opportunities';
+    const result = await parseJobMessage(genericJobMsg, true);
+    expect(result.type).toBe('job');
+    expect(result.title).not.toMatch(/\bnull\b|\bundefined\b/i);
+    expect(result.title).not.toMatch(/\bis hiring for\b/i);
   });
 
   test('returns fallback structure for empty string', async () => {

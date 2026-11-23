@@ -131,6 +131,7 @@ export function useWebSocket() {
                 console.log(`🔄 Reconnecting in ${delay / 1000}s (attempt ${reconnectAttemptsRef.current})...`);
 
                 reconnectTimeoutRef.current = setTimeout(() => {
+                    setConnectionState('connecting');
                     connectWebSocket();
                 }, delay);
             };

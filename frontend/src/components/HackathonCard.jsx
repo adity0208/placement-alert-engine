@@ -22,6 +22,28 @@ function cleanPrefix(text) {
         .trim();
 }
 
+const GENERIC_HACKATHON_TITLES = [
+    'hackathon event',
+    'coding competition',
+    'hackathon',
+    'coding challenge',
+    'competition',
+    'notification',
+    'event alert',
+    'placement opportunity',
+    'job opportunity'
+];
+
+function isGenericHackathonTitle(str) {
+    if (!str || typeof str !== 'string') return true;
+    const clean = str.trim().toLowerCase();
+    if (clean.length === 0) return true;
+    if (/^https?:\/\//i.test(clean)) return true;
+    if (/\bnull\b|\bundefined\b/i.test(clean)) return true;
+    if (/\bis hiring for\b/i.test(clean)) return true;
+    return GENERIC_HACKATHON_TITLES.includes(clean);
+}
+
 // Extract first URL found anywhere in a string
 function extractUrl(text) {
     const urlRegex = /https?:\/\/[^\s<>"]+/g;
@@ -50,7 +72,26 @@ export default function HackathonCard({ hackathon }) {
         setTimeout(() => setCopied(false), 2000);
     };
 
-    const title = cleanPrefix(hackathon?.title || 'Hackathon Event');
+    const rawTitle = cleanPrefix(hackathon?.title);
+    let title = '';
+    if (rawTitle && !isGenericHackathonTitle(rawTitle)) {
+        title = rawTitle;
+    } else if (hackathon?.message) {
+        const meaningfulLine = hackathon.message
+            .split('\n')
+            .map(line => line.replace(/https?:\/\/[^\s<>"]+/g, '').trim())
+            .find(line => line.length > 5);
+
+        if (meaningfulLine) {
+            title = meaningfulLine.length > 70 
+                ? `${meaningfulLine.slice(0, 67)}...` 
+                : meaningfulLine;
+        }
+    }
+    if (!title) {
+        title = 'Event details in message';
+    }
+
     const organizer = cleanPrefix(hackathon?.organizer || 'Contest Host');
     const prizePool = cleanPrefix(hackathon?.prizePool);
     const deadline = cleanPrefix(hackathon?.deadline);
